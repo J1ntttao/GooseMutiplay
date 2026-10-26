@@ -1,0 +1,9 @@
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.csproj.AssemblyReference.cache
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.GeneratedMSBuildEditorConfig.editorconfig
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.AssemblyInfoInputs.cache
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.AssemblyInfo.cs
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.csproj.CoreCompileInputs.cache
+D:\Code\GooseMutiplay\dist\GooseOnline.dll
+D:\Code\GooseMutiplay\dist\GooseOnline.pdb
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.dll
+D:\Code\GooseMutiplay\src\GooseOnline\obj\Release\GooseOnline.pdb

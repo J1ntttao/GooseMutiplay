@@ -1,0 +1,297 @@
+TYPE Goose
+ BASE UnityEngine.MonoBehaviour
+ IFACES IPostIKUpdatable
+  F Public RootMotion.FinalIK.AimIK aimIK
+  F Public AnimationOverrideSet animationOverrideSet
+  F Public System.Single bigGoseScalar
+  F Private UnityEngine.Transform cameraTransform
+  F Public System.Boolean canFlickToRun
+  F Public System.Boolean centerAroundGoose
+  F Public CoopBondStrain coopBondStrain
+  F Public IGooseState currentState
+  F Public System.Boolean doubleClickToRun
+  F Public Dragger dragger
+  F Public System.Boolean dropOnButtonUp
+  F Public RootMotion.FinalIK.FABRIK fabrik
+  F Public GooseBeak gooseBeak
+  F Public GooseCameraHelper gooseCameraHelper
+  F Public UnityEngine.Vector3 gooseCenterBuffer
+  F Public UnityEngine.Animator gooseEngine
+  F Public GooseEvents gooseEvents
+  F Public GooseGround gooseGround
+  F Public GooseHonker gooseHonker
+  F Public GooseLightBarHelper gooseLightBarHelper
+  F Public GooseNeck gooseNeck
+  F Public GooseNeckEvents gooseNeckEvents
+  F Public UnityEngine.GameObject goosePoseHighlighter
+  F Public GoosePoser goosePoser
+  F Public GooseShooer gooseShooer
+  F Public GooseSounds gooseSounds
+  F Public GooseSwimmer gooseSwimmer
+  F Public GooseTeleporter gooseTeleporter
+  F Public GooseWings gooseWings
+  F Public UnityEngine.Transform head
+  F Public Holder holder
+  F Public UnityEngine.Transform holdParent
+  F Public HearAtDistance honkHearAtDistance
+  F Public SingleEmoter iconEmoter
+  F Public UnityEngine.GameObject isLookingAtItem
+  F Public System.Single isRunningByDefaultMinSpeed
+  F Public System.Boolean isSwimming
+  F Public Jukebox jukebox
+  F Public System.Boolean justRan
+  F Public System.Boolean justShooed
+  F Public System.Single lateralVelocity
+  F Private System.Int32 layerMask
+  F Public System.Boolean logStickAim
+  F Public System.Boolean logVerbose
+  F Public UnityEngine.GameObject lookTarget
+  F Public System.Single mouseAimScalar
+  F Public Mover mover
+  F Public MusicContributor musicContributor
+  F Public System.Boolean newRun
+  F Public System.Boolean newShoo
+  F Public NormalState normalState
+  F Public System.Collections.Generic.List`1<GooseNoTetherZone> noTetherZones
+  F Public Rewired.Player player
+  F Public System.Int32 playerNumber
+  F Public PoseState poseState
+  F Public UnityEngine.Rigidbody rb
+  F Public PropHome ribbonHome
+  F Private System.Single runningness
+  F Public System.Single runningnessGracePeriod
+  F Public System.Single runningnessMinSpeed
+  F Public System.Single runningnessSmoothTime
+  F Private System.Single runningnessVelocity
+  F Public RunState runState
+  F Public System.Boolean safeToShoo
+  F Private System.Int32 shooContactPointsCount
+  F Public System.Collections.Generic.List`1<ShooZone> shooZones
+  F Public UnityEngine.Vector3 stickAim
+  F Public SwitchUser switchUser
+  F Public TargetHighlighter targetHighlighter
+  F Public UnityEngine.GameObject targetHighlightPrefab
+  F Public GooseTuningData tuningData
+  F Public System.Boolean useLegacyHonk
+  F Public System.Boolean useMouseAim
+  F Public VisionTarget visionTarget
+  F Public System.Single walkLoudness
+  P System.Boolean isHighlightingItem
+  P System.Boolean isRunning
+  P System.Boolean isSneaking
+  P System.Boolean justQuacked
+  M System.Void .ctor()
+  M System.Void ClearToggleButtons()
+  M BeakHandle ConnectedHandle()
+  M System.Void Drop()
+  M System.Void FixedUpdate()
+  M System.Boolean get_isHighlightingItem()
+  M System.Boolean get_isRunning()
+  M System.Boolean get_isSneaking()
+  M System.Boolean get_justQuacked()
+  M UnityEngine.Vector3 GetStickAim()
+  M System.Boolean GooseHasItem(Prop item)
+  M System.Void Initialize()
+  M System.Void LateUpdate()
+  M System.Void OnDestroy()
+  M System.Void OnDisable()
+  M System.Void OnDrawGizmosSelected()
+  M System.Void OnEnable()
+  M System.Void PlayAudioEvent(UnityEngine.AnimationEvent animationEvent)
+  M System.Void PostIKUpdate()
+  M System.Void Shoo(UnityEngine.GameObject shooer)
+  M System.Void Shoo(UnityEngine.Vector3 direction)
+  M System.Void Start()
+  M System.Void SwapToState(IGooseState newState)
+  M System.Void Update()
+  M System.Void UseSwitchOfPose(UnityEngine.AnimationEvent animationEvent)
+TYPE MultiplayerToggler
+ BASE UnityEngine.MonoBehaviour
+ IFACES 
+  F Public UnityEngine.Material materialOnInMultiplayer
+  F Public UnityEngine.Material materialOnInSingleplayer
+  F Public UnityEngine.Renderer myRenderer
+  F Public UnityEngine.Transform onInMultiplayer
+  F Public UnityEngine.Transform onInSingleplayer
+  M System.Void .ctor()
+  M System.Void OnEnable()
+TYPE BaseMultiplayerManager
+ BASE System.Object
+ IFACES 
+  F Private System.Int32 _preferredPlayerCount
+  F Public, Static, Literal, HasDefault System.Int32 PLAYER1ID
+  F Public, Static Rewired.Player playerWhoHonkedToStart
+  F Public, Static Rewired.Player playerWhoPressedQuit
+  P BaseMultiplayerManager instance
+  P System.Boolean isMultiplayer
+  P System.Int32 preferredPlayerCount
+  M System.Void .ctor()
+  M BaseMultiplayerManager get_instance()
+  M System.Boolean get_isMultiplayer()
+  M System.Int32 get_preferredPlayerCount()
+  M System.Void Inititialize()
+  M System.Void JumpToMainScene()
+  M System.Void ReturnAllFloatingControllersToPlayer1()
+  M System.Void ReturnFloatingControllersToPlayer1(Rewired.Player player)
+  M System.Void set_preferredPlayerCount(System.Int32 value)
+TYPE PlayerControlDetails
+ BASE System.Object
+ IFACES 
+  F Public Rewired.Controller activeController
+  F Public Rewired.Controller activeJoystick
+  F Public ControllerText/ControllerGlyphType glyphType
+  F Public Rewired.Player player
+  F Public System.Int32 playerId
+  P System.Boolean hasJoystick
+  M System.Void .ctor(System.Int32 playerId)
+  M System.Void ActiveRefresh()
+  M System.Boolean AreBothMouseOrKeyboard(Rewired.Controller controllerA, Rewired.Controller controllerB)
+  M System.Boolean ControllerExistsIsMineAndIsConnected(Rewired.Controller controller)
+  M System.Boolean get_hasJoystick()
+  M System.Void Initialize()
+  M System.Void OnControllerAdded(Rewired.ControllerAssignmentChangedEventArgs args)
+  M System.Void OnControllerRemoved(Rewired.ControllerAssignmentChangedEventArgs args)
+  M System.Void SetActiveController(Rewired.Controller controller)
+  M System.Boolean ShouldIDonate(Rewired.Controller controller, PlayerControlDetails other)
+TYPE GooseManager
+ BASE System.Object
+ IFACES 
+  F Private System.Boolean created
+  F Private Goose goose
+  F Private System.String joinButton
+  F Private Rewired.Player player
+  F Private System.String quitButton
+  F Private System.Single timeAtLastInput
+  M System.Void .ctor(Goose useThisGoose)
+  M System.Void Activate()
+  M System.Void CycleCameraTarget(System.Int32 delta)
+  M System.Void CycleWithinArea(System.Int32 delta)
+  M System.Void Update()
+TYPE SaveManager
+ BASE UnityEngine.MonoBehaviour
+ IFACES 
+  F Public SaveGameData currentData
+  F Public System.Int32 currentSlot
+  F Private ISaveSystem saveSystem
+  P SaveManager instance
+  P System.String PersistentDataPath
+  M System.Void .ctor()
+  M System.Void Awake()
+  M System.Void ClearCurrentFileFromEditor()
+  M System.Void ClearSlot(System.Int32 slot)
+  M ISaveSystem CreateSaveSystem()
+  M System.Void DeleteSaveFile(System.Int32 slot)
+  M System.Boolean DoesFileExist(System.Int32 slot)
+  M System.Boolean DoesFileExist(System.String path)
+  M SaveManager get_instance()
+  M System.String get_PersistentDataPath()
+  M System.DateTime GetDateTime(System.Int32 slot)
+  M System.String LoadFile(System.String path)
+  M System.Void OnDestroy()
+  M System.Void Save(System.String changedKey)
+  M System.Void SaveFile(System.String path, System.String data)
+  M System.Void SetSlot(System.Int32 slot)
+TYPE SteamManager
+ BASE System.Object
+ IFACES 
+  F Public, Static System.Boolean steamIsActive
+  M System.Void Close()
+  M System.Void Initialize()
+TYPE BeakHandle
+ BASE UnityEngine.MonoBehaviour
+ IFACES 
+  F Public System.Boolean canBeDragShared
+  F Public System.Boolean dontUseInPropJobs
+  F Public System.Boolean forceNormalHonk
+  F Public Goose isBeingDraggedBy
+  F Public System.Boolean notForGoose
+  F Public System.Boolean notForHuman
+  F Public Prop prop
+  F Public UnityEngine.Rigidbody rb
+  F Public System.String specialGrabSound
+  F Public System.String specialReleaseSound
+  F Public GooseReference specificGoose
+  F Public BeakHandle treatAsOtherHandle
+  F Public JobReference tugOfWarJob
+  F Public System.Boolean unbeakableWhenPinned
+  P Job implicitTugOfWarJob
+  P UnityEngine.Vector3 positionLocalToProp
+  P UnityEngine.Quaternion rotationLocalToProp
+  M System.Void .ctor()
+  M Job get_implicitTugOfWarJob()
+  M UnityEngine.Vector3 get_positionLocalToProp()
+  M UnityEngine.Quaternion get_rotationLocalToProp()
+  M UnityEngine.Vector3 HandlePositionAtOtherLocation(UnityEngine.Vector3 holdablePosition, UnityEngine.Quaternion holdableRotation)
+  M System.Boolean isBeakableByGoose(Goose goose)
+  M System.Void OnDrawGizmosSelected()
+  M System.Void Start()
+TYPE Prop
+ BASE UnityEngine.MonoBehaviour
+ IFACES 
+  F Public UnityEngine.Rigidbody[] allRigidbodies
+  F Public AnimationParticlePlayer animationParticlePlayer
+  F Public SwitchReference[] annoyingSwitches
+  F Public BeakHandle[] beakHandles
+  F Public UnityEngine.Vector3 cachedPositon
+  F Private UnityEngine.Vector3 cachedVelocityValue
+  F Private CameraManager cameraManager
+  F Public CustomBrandishSettings customBrandishSettings
+  F Public ReactionSet customReactionSet
+  F Public System.Boolean dontReactToTugOfWar
+  F Public System.Collections.Generic.List`1<Folk> extraOwners
+  F Private System.Boolean first
+  F Public Floaties floaties
+  F Public System.Single floatScalar
+  F Private System.Boolean hasCachedVelocityValue
+  F Public HearAtDistance[] hearAtDistances
+  F Public Holder heldBy
+  F Public System.Boolean highlightFromCenter
+  F Public UnityEngine.Rigidbody[] holdSiblings
+  F Public Ideal ideal
+  F Public System.Boolean isDistant
+  F Public System.Boolean isHonkSuspicious
+  F Public PropHome isPinnedTo
+  F Public UnityEngine.Vector3 localRenderCenter
+  F Public System.Boolean muteHonkParticles
+  F Public System.Boolean needsToBeDragged
+  F Public System.Boolean neverUnobstacle
+  F Public System.Collections.Generic.List`1<Folk> nonCleaningOwners
+  F Public Folk owner
+  F Private System.Int32 playerLayer
+  F Public PropDripper propDripper
+  F Public PropEvents propEvents
+  F Public PropGroup propGroup
+  F Public PropNMOController propNMOController
+  F Public PropPhysics propPhysics
+  F Public PropSounds propSounds
+  F Public PropXray propXray
+  F Public UnityEngine.Rigidbody rb
+  F Public System.Collections.Generic.List`1<PropGroup> secondaryPropGroups
+  F Public PropHome startHome
+  F Public PinType startingPinType
+  F Public System.Boolean tolerateGooseHolding
+  F Public System.Single twoHandDistance
+  F Public System.Boolean useVerboseLogging
+  F Public System.Single waveScalar
+  F Public Wettable wettable
+  P UnityEngine.Vector3 cachedVelocity
+  M System.Void .ctor()
+  M System.Void Awake()
+  M UnityEngine.Vector3 get_cachedVelocity()
+  M BeakHandle GetClosestHandleHuman(UnityEngine.Vector3 pos, System.Boolean jobHandlesOnly)
+  M UnityEngine.Vector3 GetRenderCenter()
+  M System.Boolean MatchesPropGroup(PropGroup propGroup)
+  M System.Void MoveBodiesTogether(UnityEngine.Rigidbody primaryBody, UnityEngine.Vector3 position)
+  M System.Void MoveBodiesTogether(UnityEngine.Rigidbody primaryBody, UnityEngine.Vector3 position, UnityEngine.Quaternion rotation)
+  M System.Void OnCollisionEnter(UnityEngine.Collision col)
+  M System.Void OnCollisionExit(UnityEngine.Collision col)
+  M System.Void OnDestroy()
+  M System.Void PickUp(Holder thisHolder, BeakHandle handle)
+  M System.Void PutDown(Holder holder)
+  M System.Void PutDown()
+  M System.Void ResetPosition()
+  M System.Void SafelySnap(PropHome home)
+  M System.Void Start()
+  M System.Void Unpin()
+  M System.Void Update()
+  M System.Void VanishExpected()

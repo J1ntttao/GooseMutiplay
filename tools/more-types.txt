@@ -1,0 +1,140 @@
+TYPE GooseReference
+ F Public, Static, Literal, HasDefault GooseReference GooseA
+ F Public, Static, Literal, HasDefault GooseReference GooseB
+ F Public, Static, Literal, HasDefault GooseReference None
+ F Public, SpecialName, RTSpecialName System.Int32 value__
+TYPE GooseSpawn
+ F Public GoalListArea area
+ F Public UnityEngine.Transform gooseBTransform
+ F Public GoosePose pose
+ F Public GoosePose poseGooseB
+ M System.Void .ctor()
+ M System.Void Awake()
+ M GoosePose GetPoseFor(Goose goose)
+ M System.Void PlaceGooseAt(Goose goose, GoalListArea area)
+TYPE BaseMultiplayerManager
+ F Private System.Int32 _preferredPlayerCount
+ F Public, Static, Literal, HasDefault System.Int32 PLAYER1ID
+ F Public, Static Rewired.Player playerWhoHonkedToStart
+ F Public, Static Rewired.Player playerWhoPressedQuit
+ P BaseMultiplayerManager instance
+ P System.Boolean isMultiplayer
+ P System.Int32 preferredPlayerCount
+ M System.Void .ctor()
+ M BaseMultiplayerManager get_instance()
+ M System.Boolean get_isMultiplayer()
+ M System.Int32 get_preferredPlayerCount()
+ M System.Void Inititialize()
+ M System.Void JumpToMainScene()
+ M System.Void ReturnAllFloatingControllersToPlayer1()
+ M System.Void ReturnFloatingControllersToPlayer1(Rewired.Player player)
+ M System.Void set_preferredPlayerCount(System.Int32 value)
+TYPE GameManager
+ F Private, Static GameManager _instance
+ F Private, Static System.Boolean <IsReady>k__BackingField
+ F Public System.Collections.Generic.List`1<Goose> allGeese
+ F Public AmbienceManager ambienceManager
+ F Public AreaTracker areaTracker
+ F Public CameraManager cameraManager
+ F Public GameManager/GeneratedGroups generatedGroups
+ F Public GoalManager goalManager
+ F Private GooseManager[] gooseManagers
+ F Public UnityEngine.Camera mainCamera
+ F Public System.Action`1<Goose> onGooseStart
+ F Public System.Action onLateStart
+ F Public PropSharedData propSharedData
+ F Public PropXraySharedData propXraySharedData
+ F Public System.Boolean readyForGeese
+ F Public, Static System.String savedTimeKey
+ F Public System.Single timeAtSessionStart
+ F Public System.Single timeFromPreviousSessions
+ F Public JobReference tugOfWarGenericJob
+ P System.Int32 activeGooseCount
+ P GameManager instance
+ P System.Boolean IsGoalManagerReady
+ P System.Boolean IsReady
+ P System.Single totalPlayTime
+ M System.Void .cctor()
+ M System.Void .ctor()
+ M System.Void ActivateAllGeese()
+ M System.Void Awake()
+ M System.Int32 get_activeGooseCount()
+ M GameManager get_instance()
+ M System.Boolean get_IsGoalManagerReady()
+ M System.Boolean get_IsReady()
+ M System.Single get_totalPlayTime()
+ M UnityEngine.GameObject[] GetActiveGeese()
+ M System.Int32 GetMinutesPlayed()
+ M Goose GetMostRecentActiveHonker()
+ M System.Void OnDestroy()
+ M System.Void PlayersChanged()
+ M System.Void SaveTimePlayed()
+ M System.Void set_IsReady(System.Boolean value)
+ M System.Void SetHonkScreenActive()
+ M System.Void Start()
+ M System.Void Update()
+TYPE MainMenu
+ F Public UnityEngine.GameObject beginHighlightElement
+ F Public UnityEngine.GameObject creditsHighlightElement
+ F Private System.Boolean initialized
+ F Private, Static MainMenu instance_
+ F Public LittleMenu littleMenu
+ F Public UnityEngine.Transform mainMenuSwappable
+ F Public UnityEngine.GameObject optionsHighlightElement
+ F Public UnityEngine.Transform playerNumberMenuSwappable
+ F Public UnityEngine.Transform quitConfirmMenuSwappable
+ F Public UnityEngine.GameObject quitHighlightElement
+ F Public UnityEngine.Transform readyMenuSwappable
+ F Public UnityEngine.Transform wholeMainMenu
+ P MainMenu instance
+ P LittleMenu mouseableLittleMenu
+ M System.Void .ctor()
+ M System.Void Accept()
+ M System.Void Activate()
+ M System.Void Awake()
+ M System.Void Back()
+ M System.Void ConfirmBegin()
+ M System.Void Down()
+ M System.Void Esc()
+ M MainMenu get_instance()
+ M LittleMenu get_mouseableLittleMenu()
+ M System.Void Goals()
+ M System.Void GoToCredits()
+ M System.Void GoToOptionsMenu()
+ M System.Void GoToPlayerNumberMenu()
+ M System.Void GoToQuit()
+ M System.Void Initialize()
+ M System.Void Left()
+ M System.Void OnDisable()
+ M System.Void OnEnable()
+ M System.Void Pause()
+ M System.Void Right()
+ M System.Void SetSwappableGroupTo(MainMenu/SwappableMenu menu)
+ M System.Void Tertiary()
+ M System.Void Up()
+TYPE PlayerNumberMenu
+ F Private System.Boolean initialized
+ F Public LittleMenu littleMenu
+ F Private, Static, Literal, HasDefault System.String paramGoToCoopConfirmMenu
+ P LittleMenu mouseableLittleMenu
+ M System.Void .ctor()
+ M System.Void Accept()
+ M System.Void Activate()
+ M System.Void Back()
+ M System.Void ConfirmOnePlayer()
+ M System.Void ConfirmTwoPlayer()
+ M System.Void Down()
+ M System.Void Esc()
+ M LittleMenu get_mouseableLittleMenu()
+ M System.Void Goals()
+ M System.Void GoToSaveMenu()
+ M System.Void GoToSaveMenuSinglePlayer()
+ M System.Void GoToSaveMenuTwoPlayer()
+ M System.Void Initialize()
+ M System.Void Left()
+ M System.Void OnDisable()
+ M System.Void OnEnable()
+ M System.Void Pause()
+ M System.Void Right()
+ M System.Void Tertiary()
+ M System.Void Up()

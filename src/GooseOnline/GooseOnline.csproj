@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>GooseOnline</AssemblyName>
+    <RootNamespace>GooseOnline</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <OutputPath>..\..\dist\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="BepInEx"><HintPath>..\..\vendor\bepinex5233\BepInEx\core\BepInEx.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>..\..\vendor\bepinex5233\BepInEx\core\0Harmony.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\Assembly-CSharp.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Facepunch.Steamworks.Win64"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\Facepunch.Steamworks.Win64.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.CoreModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.AnimationModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.AnimationModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+</Project>
+
+
+
+
