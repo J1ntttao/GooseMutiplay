@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("GooseOnline")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c4895c8cd5eb17617dbf4f11c2c75370306b84ca")]
 [assembly: System.Reflection.AssemblyProductAttribute("GooseOnline")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GooseOnline")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

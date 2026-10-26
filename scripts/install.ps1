@@ -4,7 +4,7 @@ param(
     [switch]$NoElevation, [switch]$NoPause
 )
 $ErrorActionPreference = 'Stop'
-Write-Host 'Goose Online installer 0.4.0'
+Write-Host 'Goose Online installer 0.4.1'
 $EmbeddedPluginBase64 = '__EMBEDDED_PLUGIN_BASE64__'
 $PackageRoot = $PSScriptRoot
 $MarkerName = 'gooseonline.install.json'
@@ -121,7 +121,7 @@ if ($installedLoader) {
 $plugins = Join-Path $bepRoot 'plugins'
 New-Item -ItemType Directory -Force $plugins | Out-Null
 Copy-FileWithRetry -Source $sourcePlugin -Destination (Join-Path $plugins 'GooseOnline.dll')
-$marker = [ordered]@{ mod = 'GooseOnline'; version = '0.4.0'; gamePath = (Resolve-Path $GamePath).Path; installedBepInEx = $installedLoader; installedAt = (Get-Date).ToString('o') }
+$marker = [ordered]@{ mod = 'GooseOnline'; version = '0.4.1'; gamePath = (Resolve-Path $GamePath).Path; installedBepInEx = $installedLoader; installedAt = (Get-Date).ToString('o') }
 $marker | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $bepRoot $MarkerName)
 Write-Host ''
 Write-Host 'Goose Online installation complete.' -ForegroundColor Green

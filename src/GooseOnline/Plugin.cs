@@ -1,6 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 using BepInEx;
 using HarmonyLib;
 using Steamworks;
@@ -15,7 +21,7 @@ public sealed class GooseOnlinePlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.gooseonline.steam-p2p";
     public const string PluginName = "Goose Online";
-    public const string PluginVersion = "0.4.0";
+    public const string PluginVersion = "0.4.1";
 
     private void Awake()
     {
@@ -24,6 +30,7 @@ public sealed class GooseOnlinePlugin : BaseUnityPlugin
         DontDestroyOnLoad(go);
         var runtime = go.AddComponent<OnlineRuntime>();
         runtime.PluginLogger = Logger;
+        runtime.StartUpdateCheck();
         new Harmony(PluginGuid).PatchAll();
     }
 }
@@ -65,6 +72,8 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private Protocol.Pose remotePose;
     private bool controllersNormalized;
     private bool uiVisible = true;
+    private string updateStatus = "正在检查更新...";
+    private int updateProcessId;
     private int worldSnapshotsSent;
     private int worldSnapshotsReceived;
     private int progressSnapshotsSent;
@@ -78,6 +87,129 @@ internal sealed class OnlineRuntime : MonoBehaviour
     internal void Log(string message) => PluginLogger?.LogInfo(message);
     internal void Warn(string message) { lastError = message; PluginLogger?.LogWarning(message); }
     internal void Error(string message) { lastError = message; PluginLogger?.LogError(message); }
+
+    private const string UpdateVersionUrl = "https://raw.githubusercontent.com/J1ntttao/GooseMutiplay/master/src/GooseOnline/Plugin.cs";
+    private const string UpdateDllUrl = "https://raw.githubusercontent.com/J1ntttao/GooseMutiplay/master/dist/GooseOnline.dll";
+
+    internal void StartUpdateCheck()
+    {
+        updateProcessId = Process.GetCurrentProcess().Id;
+        ThreadPool.QueueUserWorkItem(_ => CheckForUpdate());
+    }
+
+    private void CheckForUpdate()
+    {
+        try
+        {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            using (var client = new WebClient())
+            {
+                client.Headers[HttpRequestHeader.UserAgent] = "GooseOnline-Updater";
+                var source = DownloadText(client, UpdateVersionUrl);
+                var match = Regex.Match(source, @"PluginVersion\s*=\s*""(?<version>[0-9]+\.[0-9]+\.[0-9]+)""");
+                if (!match.Success) throw new InvalidDataException("远程版本号格式无效");
+                var remoteVersion = new Version(match.Groups["version"].Value);
+                var currentVersion = new Version(GooseOnlinePlugin.PluginVersion);
+                if (remoteVersion <= currentVersion)
+                {
+                    updateStatus = "已是最新版本";
+                    return;
+                }
+
+                var root = BepInEx.Paths.GameRootPath;
+                var updateDir = Path.Combine(root, "BepInEx", "update");
+                Directory.CreateDirectory(updateDir);
+                var staged = Path.Combine(updateDir, "GooseOnline.dll.download");
+                var versionFile = Path.Combine(updateDir, "GooseOnline.version");
+                if (!File.Exists(versionFile) || !string.Equals(File.ReadAllText(versionFile).Trim(), remoteVersion.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    updateStatus = "正在下载 Goose Online " + remoteVersion + "，请勿关闭游戏";
+                    DownloadFile(client, UpdateDllUrl, staged);
+                    if (!File.Exists(staged) || new FileInfo(staged).Length < 4096) throw new InvalidDataException("远程 DLL 下载不完整");
+                    File.WriteAllText(versionFile, remoteVersion.ToString());
+                }
+
+                var script = Path.Combine(updateDir, "GooseOnlineUpdater.ps1");
+                File.WriteAllText(script, UpdateScript);
+                var target = Path.Combine(root, "BepInEx", "plugins", "GooseOnline.dll");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " + Quote(script) + " -ProcessId " + updateProcessId + " -Target " + Quote(target) + " -Staged " + Quote(staged) + " -VersionFile " + Quote(versionFile) + " -Script " + Quote(script),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                using (Process.Start(psi)) { }
+                updateStatus = "更新已下载，请退出游戏；更新完成后手动重启";
+                Log("Update staged: " + remoteVersion);
+            }
+        }
+        catch (Exception ex)
+        {
+            updateStatus = "更新检查失败，继续使用当前版本";
+            PluginLogger?.LogWarning("自动更新失败: " + ex.Message);
+        }
+    }
+
+    private static string Quote(string value) => "\"" + (value ?? string.Empty).Replace("\"", "\\\"") + "\"";
+
+    private static string DownloadText(WebClient client, string url)
+    {
+        try { return client.DownloadString(url); }
+        catch { return RunPowerShell(url, null); }
+    }
+
+    private static void DownloadFile(WebClient client, string url, string path)
+    {
+        try { client.DownloadFile(url, path); }
+        catch { RunPowerShell(url, path); }
+    }
+
+    private static string RunPowerShell(string url, string outputPath)
+    {
+        var command = "$ProgressPreference='SilentlyContinue'; " +
+            (outputPath == null
+                ? "(Invoke-WebRequest -UseBasicParsing -Uri '" + EscapePowerShellString(url) + "').Content"
+                : "Invoke-WebRequest -UseBasicParsing -Uri '" + EscapePowerShellString(url) + "' -OutFile '" + EscapePowerShellString(outputPath) + "'");
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encoded,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = outputPath == null,
+            RedirectStandardError = true
+        };
+        using (var process = Process.Start(psi))
+        {
+            var output = outputPath == null ? process.StandardOutput.ReadToEnd() : string.Empty;
+            var error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            if (process.ExitCode != 0) throw new InvalidOperationException("curl failed: " + error.Trim());
+            return output;
+        }
+    }
+
+    private static string EscapePowerShellString(string value) => (value ?? string.Empty).Replace("'", "''");
+
+    private const string UpdateScript = @"
+param([int]$ProcessId, [string]$Target, [string]$Staged, [string]$VersionFile, [string]$Script)
+$ErrorActionPreference = 'Stop'
+while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 2 }
+for ($attempt = 1; $attempt -le 20; $attempt++) {
+    try {
+        Copy-Item -LiteralPath $Staged -Destination $Target -Force
+        Remove-Item -LiteralPath $Staged -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $VersionFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $Script -Force -ErrorAction SilentlyContinue
+        exit 0
+    } catch {
+        if ($attempt -eq 20) { exit 1 }
+        Start-Sleep -Milliseconds 500
+    }
+}";
 
     private void Awake()
     {
@@ -188,6 +320,7 @@ internal sealed class OnlineRuntime : MonoBehaviour
         if (!uiVisible) return;
         GUILayout.BeginArea(new Rect(16, 16, 360, 300), GUI.skin.box);
         GUILayout.Label("Goose Online " + GooseOnlinePlugin.PluginVersion);
+        if (!string.IsNullOrEmpty(updateStatus)) GUILayout.Label(updateStatus);
         GUILayout.Label(status);
         if (!SteamClient.IsValid)
         {

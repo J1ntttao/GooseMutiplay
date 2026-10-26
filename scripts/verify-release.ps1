@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
-$release = Join-Path $workspace 'dist\GooseOnline-0.4.0.zip'
+$release = Join-Path $workspace 'dist\GooseOnline-0.4.1.zip'
 $testRoot = Join-Path $workspace ('dist\install-check-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 try {

@@ -4,7 +4,7 @@ Steam-only two-player online co-op mod for the Unity Mono Steam build of Untitle
 
 ## 给朋友的安装方式
 
-1. 把整个 `GooseOnline-0.4.0.zip` 传给朋友。
+1. 把整个 `GooseOnline-0.4.1.zip` 传给朋友。
 2. 朋友解压 ZIP，不要直接在压缩包里运行。
 3. 双击 `Install-GooseOnline.bat`。
 4. 如果 Windows 弹出管理员权限窗口，选择“是”。
@@ -25,7 +25,7 @@ Steam-only two-player online co-op mod for the Unity Mono Steam build of Untitle
 
 当前版本固定两名玩家、Steam-only、不支持主机迁移。每台电脑使用本机第一控制槽操作自己的鹅，因此键盘、手柄或兼容的键鼠组合都可以使用。插件加载日志位于游戏目录的 `BepInEx\LogOutput.log`。
 
-0.4.0 会按 P1/P2 身份映射远端鹅，并在联机后自动激活 P2；移动快照使用低延迟通道减少卡顿，门/开关、区域、任务和存档进度使用低频可靠同步，同时同步位置、伸脖子、叼取/拖拽物品和主机权威的物品/NPC状态。安装器会等待游戏退出并重试被占用的 DLL。按 `F8` 可以显示或隐藏插件面板。两台电脑都要安装 0.4.0，更新后请完全退出并重新启动游戏。
+0.4.1 会按 P1/P2 身份映射远端鹅，并在联机后自动激活 P2；移动快照使用低延迟通道减少卡顿，门/开关、区域、任务和存档进度使用低频可靠同步，同时同步位置、伸脖子、叼取/拖拽物品和主机权威的物品/NPC状态。游戏启动时会从 GitHub 检查并下载最新 `GooseOnline.dll`，不会替换 BepInEx；下载期间请勿关闭游戏，下载完成后退出游戏，更新器会替换 DLL，随后手动重启。按 `F8` 可以显示或隐藏插件面板。两台电脑都要安装 0.4.1，更新后请完全退出并重新启动游戏。
 
 ## 开发者构建
 

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param([string]$GamePath, [switch]$NoElevation, [switch]$NoPause)
 $ErrorActionPreference = 'Stop'
-Write-Host 'Goose Online uninstaller 0.4.0'
+Write-Host 'Goose Online uninstaller 0.4.1'
 function Test-IsAdministrator { $identity = [Security.Principal.WindowsIdentity]::GetCurrent(); $principal = New-Object Security.Principal.WindowsPrincipal($identity); return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 if (-not (Test-IsAdministrator) -and -not $NoElevation) { $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath); if ($GamePath) { $args += @('-GamePath',$GamePath) }; Start-Process powershell.exe -Verb RunAs -ArgumentList $args | Out-Null; exit 0 }
 function Get-SteamRoots {
@@ -25,8 +25,13 @@ if (-not $GamePath) { $GamePath = Find-GamePath }
 if (-not $GamePath) { $GamePath = Read-Host 'Paste the Untitled Goose Game folder path' }
 $plugin = Join-Path $GamePath 'BepInEx\plugins\GooseOnline.dll'
 $marker = Join-Path $GamePath 'BepInEx\gooseonline.install.json'
+$updateDir = Join-Path $GamePath 'BepInEx\update'
 if (Test-Path $plugin) { Remove-Item -LiteralPath $plugin -Force }
 if (Test-Path $marker) { Remove-Item -LiteralPath $marker -Force }
+foreach ($file in @('GooseOnline.dll.download', 'GooseOnline.version', 'GooseOnlineUpdater.ps1')) {
+    $path = Join-Path $updateDir $file
+    if (Test-Path $path) { Remove-Item -LiteralPath $path -Force }
+}
 Write-Host ''
 Write-Host 'Goose Online uninstalled.' -ForegroundColor Green
 Write-Host 'BepInEx was kept so other mods are not affected.'

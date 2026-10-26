@@ -16,7 +16,7 @@ foreach (var type in new[] { MessageType.Welcome, MessageType.Leave, MessageType
         Check(!Protocol.TryDecode(bytes.Take(i).ToArray(), out _), "Truncated header accepted");
 }
 
-var hello = Protocol.Encode(MessageType.Hello, 0, w => { w.Write("0.3.4"); w.Write(Protocol.Version); });
+var hello = Protocol.Encode(MessageType.Hello, 0, w => { w.Write("0.4.1"); w.Write(Protocol.Version); });
 Check(Protocol.TryDecode(hello, out var receivedHello), "Host cannot receive Hello");
 Check(receivedHello.Type == MessageType.Hello, "Wrong handshake request");
 var welcome = Protocol.Encode(MessageType.Welcome, 1);
