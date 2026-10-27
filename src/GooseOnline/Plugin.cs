@@ -613,7 +613,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                     if (goalState.Awarded && !goal.awarded) goal.SetToAwarded();
                     if (!goalState.Hidden && goal.hidden) goal.Unhide();
                 }
-            SaveManager.instance?.Save("GooseOnline.InitialSync");
+            SaveManager.Save("GooseOnline.InitialSync");
         }
         catch (Exception ex) { Warn("应用关卡进度失败: " + ex.Message); }
     }
