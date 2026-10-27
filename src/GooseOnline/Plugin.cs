@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -21,7 +22,7 @@ public sealed class GooseOnlinePlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.gooseonline.steam-p2p";
     public const string PluginName = "Goose Online";
-    public const string PluginVersion = "0.4.2";
+    public const string PluginVersion = "0.4.19";
 
     private void Awake()
     {
@@ -47,7 +48,9 @@ internal sealed class OnlineRuntime : MonoBehaviour
 
     private const uint AppId = 837470;
     private const int Channel = 37;
-    private const float SnapshotInterval = 0.10f;
+    private const int MaxUnreliablePacketBytes = 1200;
+    private const float SnapshotInterval = 0.25f;
+    private const float FullWorldResyncInterval = 10.00f;
     private const float ObjectCacheInterval = 1.00f;
     private const float PoseInterval = 1f / 30f;
     private const string VersionKey = "gooseonline_version";
@@ -68,11 +71,16 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private string connectedPlayerName = "未连接";
     private string connectedPlayerId = "-";
     private Protocol.Pose remotePose;
+    private bool remoteHeldStateKnown;
+    private string remoteAppliedHeldPropPath = string.Empty;
+    private bool remoteAppliedDragging;
+    private string lastLocalHeldPropPath = string.Empty;
     private bool localGameReadyAnnounced;
     private bool remoteGameReady;
     private bool initialStateSent;
     private bool initialWorldApplied;
     private bool initialProgressApplied;
+    private bool initialProgressAcknowledged;
     private bool uiVisible = true;
     private string updateStatus = "正在检查更新...";
     private int updateProcessId;
@@ -81,10 +89,28 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private int progressSnapshotsSent;
     private int progressSnapshotsReceived;
     private float nextWorldSnapshotWarning;
+    private float nextProgressSnapshotWarning;
+    private float nextSendWarning;
+    private float nextInitialProgressRetry;
+    private float nextMissingPropWarning;
+    private float nextMissingSwitchWarning;
+    private float nextFullWorldResync;
+    private bool switchSnapshotPending;
+    private readonly HashSet<Brain> remoteBrainAgents = new HashSet<Brain>();
+    private readonly Dictionary<string, int> authoritativeSwitchStates = new Dictionary<string, int>(StringComparer.Ordinal);
+    private readonly Dictionary<string, Protocol.PropState> lastSentProps = new Dictionary<string, Protocol.PropState>(StringComparer.Ordinal);
+    private readonly Dictionary<string, Protocol.PropState> lastSentBrains = new Dictionary<string, Protocol.PropState>(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> lastSentSwitches = new Dictionary<string, int>(StringComparer.Ordinal);
+    private readonly Dictionary<Brain, Protocol.PropState> remoteBrainTargets = new Dictionary<Brain, Protocol.PropState>();
+    private readonly Dictionary<string, string> authoritativeBrainStates = new Dictionary<string, string>(StringComparer.Ordinal);
+    private readonly Dictionary<string, float> localPropReleaseGraceUntil = new Dictionary<string, float>(StringComparer.Ordinal);
     private readonly Dictionary<string, Prop> propsByPath = new Dictionary<string, Prop>(StringComparer.Ordinal);
+    private readonly Dictionary<string, Prop> propsByAlias = new Dictionary<string, Prop>(StringComparer.Ordinal);
     private readonly Dictionary<string, float> remotePropTimes = new Dictionary<string, float>(StringComparer.Ordinal);
     private readonly Dictionary<string, Brain> brainsByPath = new Dictionary<string, Brain>(StringComparer.Ordinal);
+    private readonly Dictionary<string, Brain> brainsByAlias = new Dictionary<string, Brain>(StringComparer.Ordinal);
     private readonly Dictionary<string, SwitchSystem> switchesByPath = new Dictionary<string, SwitchSystem>(StringComparer.Ordinal);
+    private readonly Dictionary<string, SwitchSystem> switchesByAlias = new Dictionary<string, SwitchSystem>(StringComparer.Ordinal);
 
     internal void Log(string message) => PluginLogger?.LogInfo(message);
     internal void Warn(string message) { lastError = message; PluginLogger?.LogWarning(message); }
@@ -300,17 +326,60 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                 SendLocalPose();
             }
         }
-        else if (Role == OnlineRole.Host && initialStateSent && Time.unscaledTime >= nextSnapshot)
+        else if (Role == OnlineRole.Host)
         {
-            nextSnapshot = Time.unscaledTime + SnapshotInterval;
-            SendWorldSnapshot();
+            if (Time.unscaledTime >= nextPose)
+            {
+                nextPose = Time.unscaledTime + PoseInterval;
+                SendHostPose();
+            }
+            if (Time.unscaledTime >= nextSnapshot)
+            {
+                switchSnapshotPending = false;
+                nextSnapshot = Time.unscaledTime + SnapshotInterval;
+                SendWorldSnapshot();
+            }
+            else if (switchSnapshotPending)
+            {
+                switchSnapshotPending = false;
+                nextSnapshot = Time.unscaledTime + SnapshotInterval;
+                SendWorldSnapshot();
+            }
         }
     }
 
     private void LateUpdate()
     {
+        ApplyRemoteBrainTargets();
         if (!IsConnected || remotePose == null) return;
         ApplyGoosePose(1, remotePose);
+    }
+
+    private void ApplyRemoteBrainTargets()
+    {
+        if (Role != OnlineRole.Client || remoteBrainTargets.Count == 0) return;
+        var expired = new List<Brain>();
+        var blend = 1f - Mathf.Exp(-18f * Time.unscaledDeltaTime);
+        foreach (var pair in remoteBrainTargets)
+        {
+            var brain = pair.Key;
+            var target = pair.Value;
+            if (brain == null || target == null)
+            {
+                expired.Add(brain);
+                continue;
+            }
+            var position = Vector3.Lerp(brain.transform.position, target.Position, blend);
+            var rotation = Quaternion.Slerp(brain.transform.rotation, target.Rotation, blend);
+            brain.transform.SetPositionAndRotation(position, rotation);
+            if (brain.agent != null && brain.agent.isOnNavMesh)
+                brain.agent.nextPosition = position;
+
+            if (authoritativeBrainStates.TryGetValue(GetStablePath(brain.transform), out var stateName) &&
+                !string.IsNullOrEmpty(stateName))
+                ApplyBrainState(brain, stateName);
+        }
+        foreach (var brain in expired) remoteBrainTargets.Remove(brain);
     }
 
     private void OnGUI()
@@ -475,23 +544,145 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
     {
         var goose = GetGoose(0);
         if (goose == null) return;
-        Send(Protocol.EncodePose(tick++, ToPose(goose)), P2PSend.UnreliableNoDelay);
+        var pose = ToPose(goose);
+        TrackLocalHeldProp(pose.HeldPropPath);
+        Send(Protocol.EncodePose(tick++, pose), P2PSend.UnreliableNoDelay);
+    }
+
+    private void SendHostPose()
+    {
+        var goose = GetGoose(0);
+        if (goose == null) return;
+        Send(Protocol.EncodeHostPose(tick++, ToPose(goose)), P2PSend.UnreliableNoDelay);
     }
 
     private void SendWorldSnapshot()
     {
         var state = BuildWorldState();
-        if (state == null) return;
-        Send(Protocol.EncodeWorld(state.Tick, state), P2PSend.UnreliableNoDelay);
-        worldSnapshotsSent++;
+        if (state == null)
+        {
+            if (Time.unscaledTime >= nextWorldSnapshotWarning)
+            {
+                nextWorldSnapshotWarning = Time.unscaledTime + 2f;
+                Warn("世界快照未发送：P1/P2 尚未同时就绪");
+            }
+            return;
+        }
+        if (Time.unscaledTime >= nextFullWorldResync ||
+            (lastSentSwitches.Count == 0 && lastSentBrains.Count == 0 && lastSentProps.Count == 0))
+        {
+            if (Send(Protocol.EncodeWorld(state.Tick, state), P2PSend.Reliable))
+            {
+                RememberSentWorld(state, true);
+                nextFullWorldResync = Time.unscaledTime + FullWorldResyncInterval;
+                worldSnapshotsSent++;
+            }
+            return;
+        }
+
+        var delta = BuildLiveWorldDelta(state);
+        if (Send(Protocol.EncodeLiveWorld(delta.Tick, delta), P2PSend.Reliable))
+        {
+            RememberSentWorld(delta, false);
+            worldSnapshotsSent++;
+        }
     }
 
-    private void SendInitialWorldSnapshot()
+    private Protocol.WorldState BuildLiveWorldDelta(Protocol.WorldState state)
+    {
+        var delta = new Protocol.WorldState { Tick = state.Tick, GooseA = state.GooseA, GooseB = state.GooseB };
+        foreach (var switchState in state.Switches)
+        {
+            if (lastSentSwitches.TryGetValue(switchState.Path, out var previous) && previous == switchState.State) continue;
+            TryAddLiveSwitch(delta, switchState);
+        }
+        foreach (var brainState in state.Brains)
+        {
+            if (lastSentBrains.TryGetValue(brainState.Path, out var previous) && SameWorldObject(previous, brainState)) continue;
+            TryAddLiveBrain(delta, brainState);
+        }
+        foreach (var propState in state.Props.OrderByDescending(prop => !string.IsNullOrEmpty(prop.HeldByBrainPath)))
+        {
+            if (lastSentProps.TryGetValue(propState.Path, out var previous) && SameWorldObject(previous, propState)) continue;
+            TryAddLiveProp(delta, propState);
+        }
+        return delta;
+    }
+
+    private static bool SameWorldObject(Protocol.PropState left, Protocol.PropState right)
+    {
+        if (left == null || right == null) return false;
+        return string.Equals(left.HeldByBrainPath ?? string.Empty, right.HeldByBrainPath ?? string.Empty, StringComparison.Ordinal) &&
+            string.Equals(left.BrainState ?? string.Empty, right.BrainState ?? string.Empty, StringComparison.Ordinal) &&
+            (left.Position - right.Position).sqrMagnitude < 0.0025f &&
+            Quaternion.Angle(left.Rotation, right.Rotation) < 2f &&
+            (left.Velocity - right.Velocity).sqrMagnitude < 0.01f;
+    }
+
+    private static void TryAddLiveSwitch(Protocol.WorldState delta, Protocol.SwitchState switchState)
+    {
+        delta.Switches.Add(switchState);
+        if (!LiveWorldContainsAll(delta)) delta.Switches.RemoveAt(delta.Switches.Count - 1);
+    }
+
+    private static void TryAddLiveBrain(Protocol.WorldState delta, Protocol.PropState brainState)
+    {
+        delta.Brains.Add(brainState);
+        if (!LiveWorldContainsAll(delta)) delta.Brains.RemoveAt(delta.Brains.Count - 1);
+    }
+
+    private static void TryAddLiveProp(Protocol.WorldState delta, Protocol.PropState propState)
+    {
+        delta.Props.Add(propState);
+        if (!LiveWorldContainsAll(delta)) delta.Props.RemoveAt(delta.Props.Count - 1);
+    }
+
+    private static bool LiveWorldContainsAll(Protocol.WorldState state)
+    {
+        try
+        {
+            var bytes = Protocol.EncodeLiveWorld(state.Tick, state);
+            if (!Protocol.TryDecode(bytes, out var packet) || !Protocol.TryReadWorld(packet, out var decoded)) return false;
+            return decoded.Switches.Count == state.Switches.Count && decoded.Brains.Count == state.Brains.Count && decoded.Props.Count == state.Props.Count;
+        }
+        catch { return false; }
+    }
+
+    private void RememberSentWorld(Protocol.WorldState state, bool replace)
+    {
+        if (replace)
+        {
+            lastSentProps.Clear();
+            lastSentBrains.Clear();
+            lastSentSwitches.Clear();
+        }
+        foreach (var prop in state.Props) lastSentProps[prop.Path] = CloneWorldObject(prop);
+        foreach (var brain in state.Brains) lastSentBrains[brain.Path] = CloneWorldObject(brain);
+        foreach (var switchState in state.Switches) lastSentSwitches[switchState.Path] = switchState.State;
+    }
+
+    private static Protocol.PropState CloneWorldObject(Protocol.PropState source)
+    {
+        return new Protocol.PropState
+        {
+            Path = source.Path,
+            HeldByBrainPath = source.HeldByBrainPath,
+            BrainState = source.BrainState,
+            Position = source.Position,
+            Rotation = source.Rotation,
+            Velocity = source.Velocity
+        };
+    }
+
+    private bool SendInitialWorldSnapshot()
     {
         var state = BuildWorldState();
-        if (state == null) return;
-        Send(Protocol.EncodeInitialWorld(state.Tick, state), P2PSend.ReliableWithBuffering);
+        if (state == null) return false;
+        if (!Send(Protocol.EncodeInitialWorld(state.Tick, state), P2PSend.Reliable)) return false;
+        RememberSentWorld(state, true);
+        nextFullWorldResync = Time.unscaledTime + FullWorldResyncInterval;
         worldSnapshotsSent++;
+        return true;
     }
 
     private Protocol.WorldState BuildWorldState()
@@ -504,20 +695,26 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         foreach (var prop in propsByPath.Values)
         {
             if (prop == null || prop.rb == null) continue;
-            state.Props.Add(new Protocol.PropState { Path = GetPropKey(prop), Position = prop.transform.position, Rotation = prop.transform.rotation, Velocity = prop.rb.velocity });
+            var heldByBrainPath = prop.heldBy != null && prop.heldBy.brain != null
+                ? GetStablePath(prop.heldBy.brain.transform)
+                : string.Empty;
+            state.Props.Add(new Protocol.PropState { Path = GetPropKey(prop), HeldByBrainPath = heldByBrainPath, Position = prop.transform.position, Rotation = prop.transform.rotation, Velocity = prop.rb.velocity });
         }
         RebuildBrainCache();
         foreach (var brain in brainsByPath.Values)
         {
-            if (brain == null || brain.root == null) continue;
-            state.Brains.Add(new Protocol.PropState { Path = GetStablePath(brain.root), Position = brain.root.position, Rotation = brain.root.rotation, Velocity = Vector3.zero });
+            if (brain == null) continue;
+            state.Brains.Add(new Protocol.PropState { Path = GetStablePath(brain.transform), BrainState = GetBrainStateName(brain), Position = brain.transform.position, Rotation = brain.transform.rotation, Velocity = Vector3.zero });
         }
+        RebuildSwitchCache();
+        foreach (var pair in switchesByPath)
+            if (pair.Value != null) state.Switches.Add(new Protocol.SwitchState { Path = pair.Key, State = pair.Value.currentState });
         return state;
     }
 
-    private void SendProgressSnapshot()
+    private bool SendProgressSnapshot()
     {
-        if (Role != OnlineRole.Host || !IsConnected) return;
+        if (Role != OnlineRole.Host || !IsConnected) return false;
         RebuildSwitchCache();
         var state = new Protocol.ProgressState { Area = (int)AreaTracker.mostRecentArea };
         foreach (var pair in switchesByPath)
@@ -532,8 +729,12 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                     if (goal != null && goal.goalInfo.goalName != null) state.Goals.Add(new Protocol.GoalState { Name = goal.goalInfo.goalName, Awarded = goal.awarded, Hidden = goal.hidden });
         }
         catch (Exception ex) { Warn("收集任务进度失败: " + ex.Message); }
-        Send(Protocol.EncodeProgress(tick++, state), P2PSend.ReliableWithBuffering);
+        // Flush this packet immediately. World and progress packets share the
+        // channel, and buffering the progress packet can leave the client with
+        // only the initial world count visible.
+        if (!Send(Protocol.EncodeProgress(tick++, state), P2PSend.Reliable)) return false;
         progressSnapshotsSent++;
+        return true;
     }
 
     private void UpdateInitialSync()
@@ -542,7 +743,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
 
         if (Role == OnlineRole.Client && !localGameReadyAnnounced)
         {
-            Send(Protocol.Encode(MessageType.GameReady, tick++), P2PSend.Reliable);
+            if (!Send(Protocol.Encode(MessageType.GameReady, tick++), P2PSend.Reliable)) return;
             localGameReadyAnnounced = true;
             status = "已进入游戏，等待主机同步进度";
         }
@@ -550,6 +751,11 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         if (Role == OnlineRole.Host && remoteGameReady && !initialStateSent)
         {
             SendInitialState();
+        }
+        else if (Role == OnlineRole.Host && remoteGameReady && initialStateSent && !initialProgressAcknowledged && Time.unscaledTime >= nextInitialProgressRetry)
+        {
+            nextInitialProgressRetry = Time.unscaledTime + 1f;
+            SendProgressSnapshot();
         }
     }
 
@@ -564,9 +770,10 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         if (initialStateSent || Role != OnlineRole.Host || !IsConnected || !IsGameplayReady()) return;
         try
         {
-            SendInitialWorldSnapshot();
-            SendProgressSnapshot();
+            if (!SendInitialWorldSnapshot() || !SendProgressSnapshot()) return;
             initialStateSent = true;
+            initialProgressAcknowledged = false;
+            nextInitialProgressRetry = Time.unscaledTime + 1f;
             status = "双方已进入游戏，已发送初始世界进度";
         }
         catch (Exception ex) { Warn("发送初始世界进度失败: " + ex.Message); }
@@ -578,7 +785,9 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         RebuildSwitchCache();
         foreach (var switchState in state.Switches)
         {
-            if (!switchesByPath.TryGetValue(switchState.Path, out var system) || system == null || system.currentState == switchState.State) continue;
+            if (!TryFindSwitch(switchState.Path, out var system) || system == null) continue;
+            authoritativeSwitchStates[GetStablePath(system.transform)] = switchState.State;
+            if (system.currentState == switchState.State) continue;
             try { system.SetState(switchState.State, null); } catch (Exception ex) { Warn("同步门/开关失败: " + ex.Message); }
         }
         try
@@ -616,10 +825,31 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         catch (Exception ex) { Warn("应用关卡进度失败: " + ex.Message); }
     }
 
-    private void Send(byte[] data, P2PSend mode)
+    private bool Send(byte[] data, P2PSend mode)
     {
-        if (!peer.IsValid || data == null) return;
-        try { SteamNetworking.SendP2PPacket(peer, data, data.Length, Channel, mode); } catch (Exception ex) { Warn("发送网络包失败: " + ex.Message); }
+        if (!peer.IsValid || data == null) return false;
+        // Steam's unreliable modes cannot carry more than 1200 bytes.
+        // Reliable sends fragment larger world snapshots inside Steam.
+        if (data.Length > MaxUnreliablePacketBytes && (mode == P2PSend.Unreliable || mode == P2PSend.UnreliableNoDelay))
+            mode = P2PSend.Reliable;
+        try
+        {
+            if (SteamNetworking.SendP2PPacket(peer, data, data.Length, Channel, mode)) return true;
+            if (Time.unscaledTime >= nextSendWarning)
+            {
+                nextSendWarning = Time.unscaledTime + 2f;
+                Warn("Steam 拒绝发送网络包: " + data.Length + " bytes, " + mode);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (Time.unscaledTime >= nextSendWarning)
+            {
+                nextSendWarning = Time.unscaledTime + 2f;
+                Warn("发送网络包失败: " + ex.Message);
+            }
+        }
+        return false;
     }
 
     private void ReadPackets()
@@ -655,6 +885,9 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             case MessageType.ClientPose:
                 if (Role == OnlineRole.Host && Protocol.TryReadPose(packet, out var pose)) QueueRemotePose(pose);
                 break;
+            case MessageType.HostPose:
+                if (Role == OnlineRole.Client && Protocol.TryReadPose(packet, out var hostPose)) QueueRemotePose(hostPose);
+                break;
             case MessageType.GameReady:
                 if (Role == OnlineRole.Host)
                 {
@@ -680,19 +913,49 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                 }
                 break;
             case MessageType.WorldSnapshot:
-                if (Role == OnlineRole.Client && Protocol.TryReadWorld(packet, out var liveWorld))
-                    ApplyLiveWorld(liveWorld);
+                if (Role == OnlineRole.Client)
+                {
+                    if (Protocol.TryReadWorld(packet, out var liveWorld))
+                    {
+                        worldSnapshotsReceived++;
+                        ApplyLiveWorld(liveWorld);
+                    }
+                    else if (Time.unscaledTime >= nextWorldSnapshotWarning)
+                    {
+                        nextWorldSnapshotWarning = Time.unscaledTime + 2f;
+                        Warn("主机实时世界快照解析失败");
+                    }
+                }
                 break;
             case MessageType.GoalAwarded:
                 if (Role == OnlineRole.Client && Protocol.TryReadGoal(packet, out var goalName)) ApplyGoal(goalName);
                 break;
             case MessageType.ProgressSnapshot:
-                if (Role == OnlineRole.Client && !initialProgressApplied && Protocol.TryReadProgress(packet, out var progress))
+                if (Role == OnlineRole.Client)
                 {
-                    progressSnapshotsReceived++;
-                    ApplyProgress(progress);
-                    initialProgressApplied = true;
-                    if (initialWorldApplied) status = "已完成主机世界进度同步";
+                    if (Protocol.TryReadProgress(packet, out var progress))
+                    {
+                        progressSnapshotsReceived++;
+                        if (!initialProgressApplied)
+                        {
+                            ApplyProgress(progress);
+                            initialProgressApplied = true;
+                            if (initialWorldApplied) status = "已完成主机世界进度同步";
+                        }
+                        Send(Protocol.Encode(MessageType.ProgressApplied, packet.Tick), P2PSend.Reliable);
+                    }
+                    else if (Time.unscaledTime >= nextProgressSnapshotWarning)
+                    {
+                        nextProgressSnapshotWarning = Time.unscaledTime + 2f;
+                        Warn("主机进度快照解析失败，Tick=" + packet.Tick + ", Bytes=" + (packet.Payload == null ? 0 : packet.Payload.Length));
+                    }
+                }
+                break;
+            case MessageType.ProgressApplied:
+                if (Role == OnlineRole.Host)
+                {
+                    initialProgressAcknowledged = true;
+                    Log("客户端已确认进度同步，Tick=" + packet.Tick);
                 }
                 break;
             case MessageType.Leave:
@@ -703,34 +966,116 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
     private void ApplyWorld(Protocol.WorldState state)
     {
         // Host P1 is the remote goose on the client; host P2 is the client's local goose.
-        ApplyGoosePose(1, state.GooseA);
+        if (remotePose == null)
+        {
+            ApplyGoosePose(1, state.GooseA);
+            QueueRemotePose(state.GooseA);
+        }
         ApplyGoosePose(0, state.GooseB);
-        QueueRemotePose(state.GooseA);
         ApplyWorldObjects(state);
     }
 
     private void ApplyLiveWorld(Protocol.WorldState state)
     {
-        QueueRemotePose(state.GooseA);
         ApplyWorldObjects(state);
     }
 
     private void ApplyWorldObjects(Protocol.WorldState state)
     {
         RebuildPropCache();
+        var suppressedProps = GetWorldSuppressedProps();
         foreach (var propState in state.Props)
         {
-            if (!propsByPath.TryGetValue(propState.Path, out var prop) || prop == null || prop.rb == null) continue;
+            if (!TryFindProp(propState.Path, out var prop) || prop == null || prop.rb == null) continue;
+            if (suppressedProps.Contains(prop)) continue;
             prop.transform.SetPositionAndRotation(propState.Position, propState.Rotation);
             prop.rb.velocity = propState.Velocity;
-            remotePropTimes[propState.Path] = Time.unscaledTime;
+            remotePropTimes[GetPropKey(prop)] = Time.unscaledTime;
         }
         RebuildBrainCache();
         foreach (var brainState in state.Brains)
         {
-            if (brainsByPath.TryGetValue(brainState.Path, out var brain) && brain != null && brain.root != null)
-                brain.root.SetPositionAndRotation(brainState.Position, brainState.Rotation);
+            if (TryFindBrain(brainState.Path, out var brain) && brain != null)
+            {
+                if (Role == OnlineRole.Client && brain.agent != null)
+                {
+                    brain.agent.updatePosition = false;
+                    brain.agent.updateRotation = false;
+                    remoteBrainAgents.Add(brain);
+                    if (brain.agent.isOnNavMesh) brain.agent.nextPosition = brain.transform.position;
+                    remoteBrainTargets[brain] = CloneWorldObject(brainState);
+                    authoritativeBrainStates[GetStablePath(brain.transform)] = brainState.BrainState ?? string.Empty;
+                    ApplyBrainState(brain, brainState.BrainState);
+                }
+            }
         }
+        ApplyNpcHeldProps(state);
+        ApplyWorldSwitches(state);
+    }
+
+    private void ApplyWorldSwitches(Protocol.WorldState state)
+    {
+        RebuildSwitchCache();
+        foreach (var switchState in state.Switches)
+        {
+            if (!TryFindSwitch(switchState.Path, out var system) || system == null)
+            {
+                if (Time.unscaledTime >= nextMissingSwitchWarning)
+                {
+                    nextMissingSwitchWarning = Time.unscaledTime + 2f;
+                    Warn("找不到远端开关: " + switchState.Path);
+                }
+                continue;
+            }
+            authoritativeSwitchStates[GetStablePath(system.transform)] = switchState.State;
+            if (system.currentState == switchState.State) continue;
+            try { system.SetState(switchState.State, null); }
+            catch (Exception ex) { Warn("同步实时开关失败: " + ex.Message); }
+        }
+    }
+
+    private void ApplyNpcHeldProps(Protocol.WorldState state)
+    {
+        foreach (var propState in state.Props)
+        {
+            if (string.IsNullOrEmpty(propState.HeldByBrainPath)) continue;
+            if (!TryFindProp(propState.Path, out var prop) || prop == null) continue;
+            if (!TryFindBrain(propState.HeldByBrainPath, out var brain) || brain == null || brain.holder == null) continue;
+            if (brain.holder.holding == prop) continue;
+            var handle = FindHandleForProp(brain.holder, prop);
+            if (handle == null || handle.prop == null) continue;
+            try { brain.holder.PickUp(handle); }
+            catch (Exception ex) { Warn("同步 NPC 携带物品失败: " + ex.Message); }
+        }
+    }
+
+    private void TrackLocalHeldProp(string heldPath)
+    {
+        heldPath ??= string.Empty;
+        if (!string.IsNullOrEmpty(lastLocalHeldPropPath) && string.IsNullOrEmpty(heldPath))
+            localPropReleaseGraceUntil[lastLocalHeldPropPath] = Time.unscaledTime + 1.25f;
+        lastLocalHeldPropPath = heldPath;
+    }
+
+    private HashSet<Prop> GetWorldSuppressedProps()
+    {
+        var suppressed = new HashSet<Prop>();
+        foreach (var goose in GetGeese())
+        {
+            var held = goose != null && goose.dragger != null && goose.dragger.active ? goose.dragger.holdable : goose?.holder?.holding;
+            if (held != null) suppressed.Add(held);
+        }
+        if (remotePose != null && TryFindProp(remotePose.HeldPropPath, out var remoteHeld) && remoteHeld != null)
+            suppressed.Add(remoteHeld);
+
+        var expired = new List<string>();
+        foreach (var pair in localPropReleaseGraceUntil)
+        {
+            if (pair.Value <= Time.unscaledTime) { expired.Add(pair.Key); continue; }
+            if (TryFindProp(pair.Key, out var released) && released != null) suppressed.Add(released);
+        }
+        foreach (var key in expired) localPropReleaseGraceUntil.Remove(key);
+        return suppressed;
     }
 
     private void ApplyGoosePose(int index, Protocol.Pose pose)
@@ -774,21 +1119,42 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
     {
         if (goose.holder == null || goose.dragger == null) return;
         var desiredPath = pose.HeldPropPath ?? string.Empty;
+        var desiredNormalizedPath = NormalizePropKey(desiredPath);
+        if (remoteHeldStateKnown && string.Equals(remoteAppliedHeldPropPath, desiredNormalizedPath, StringComparison.Ordinal) && remoteAppliedDragging == pose.IsDragging)
+            return;
         var currentProp = goose.dragger.active ? goose.dragger.holdable : goose.holder.holding;
         var currentPath = currentProp == null ? string.Empty : GetPropKey(currentProp);
         var currentDragging = goose.dragger.active;
-        if (string.Equals(currentPath, desiredPath, StringComparison.Ordinal) && currentDragging == pose.IsDragging) return;
+        var samePath = string.Equals(currentPath, desiredPath, StringComparison.Ordinal) ||
+            string.Equals(NormalizePropKey(currentPath), desiredNormalizedPath, StringComparison.Ordinal);
+        if (samePath && currentDragging == pose.IsDragging)
+        {
+            remoteHeldStateKnown = true;
+            remoteAppliedHeldPropPath = desiredNormalizedPath;
+            remoteAppliedDragging = pose.IsDragging;
+            return;
+        }
 
         if (currentProp != null)
         {
             try { goose.Drop(); } catch (Exception ex) { Warn("释放远端物品失败: " + ex.Message); }
         }
-        if (string.IsNullOrEmpty(desiredPath)) return;
+        if (string.IsNullOrEmpty(desiredPath))
+        {
+            remoteHeldStateKnown = true;
+            remoteAppliedHeldPropPath = string.Empty;
+            remoteAppliedDragging = false;
+            return;
+        }
 
         RebuildPropCache();
-        if (!propsByPath.TryGetValue(desiredPath, out var prop) || prop == null)
+        if (!TryFindProp(desiredPath, out var prop) || prop == null)
         {
-            Warn("找不到远端携带物品: " + desiredPath);
+            if (Time.unscaledTime >= nextMissingPropWarning)
+            {
+                nextMissingPropWarning = Time.unscaledTime + 2f;
+                Warn("找不到远端携带物品: " + desiredPath);
+            }
             return;
         }
         var handle = FindHandleForProp(goose, prop);
@@ -801,6 +1167,9 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         {
             if (pose.IsDragging) goose.dragger.PickUp(handle);
             else goose.holder.PickUp(handle);
+            remoteHeldStateKnown = true;
+            remoteAppliedHeldPropPath = desiredNormalizedPath;
+            remoteAppliedDragging = pose.IsDragging;
         }
         catch (Exception ex) { Warn("同步远端携带物品失败: " + ex.Message); }
     }
@@ -815,10 +1184,10 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             var game = GameManager.instance;
             if (game != null && game.readyForGeese)
             {
-                if (game.activeGooseCount < 2)
-                {
-                    try { game.ActivateAllGeese(); } catch (Exception ex) { Warn("原版双人鹅激活失败: " + ex.Message); }
-                }
+                // Do not call GameManager.ActivateAllGeese here. The original
+                // game may have created gooseManagers for one player while
+                // preferredPlayerCount is already two, which makes that method
+                // index past its internal array.
                 EnsureGooseActive(GetGoose(0));
                 EnsureGooseActive(GetGoose(1));
             }
@@ -835,6 +1204,27 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         initialStateSent = false;
         initialWorldApplied = false;
         initialProgressApplied = false;
+        initialProgressAcknowledged = false;
+        nextWorldSnapshotWarning = 0f;
+        nextProgressSnapshotWarning = 0f;
+        nextSendWarning = 0f;
+        nextInitialProgressRetry = 0f;
+        nextMissingPropWarning = 0f;
+        nextMissingSwitchWarning = 0f;
+        nextFullWorldResync = 0f;
+        switchSnapshotPending = false;
+        authoritativeSwitchStates.Clear();
+        lastSentProps.Clear();
+        lastSentBrains.Clear();
+        lastSentSwitches.Clear();
+        remoteBrainTargets.Clear();
+        authoritativeBrainStates.Clear();
+        RestoreRemoteBrainAgents();
+        remoteHeldStateKnown = false;
+        remoteAppliedHeldPropPath = string.Empty;
+        remoteAppliedDragging = false;
+        lastLocalHeldPropPath = string.Empty;
+        localPropReleaseGraceUntil.Clear();
     }
 
     private List<Goose> GetGeese()
@@ -886,10 +1276,44 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
     private void RebuildPropCache()
     {
         propsByPath.Clear();
+        propsByAlias.Clear();
         foreach (var prop in UObject.FindObjectsOfType<Prop>())
+            if (prop != null) AddPropToCache(prop);
+    }
+
+    private void AddPropToCache(Prop prop)
+    {
+        var key = GetPropKey(prop);
+        propsByPath[key] = prop;
+        foreach (var alias in GetPropAliases(prop, key))
+            if (!propsByAlias.ContainsKey(alias)) propsByAlias[alias] = prop;
+    }
+
+    private bool TryFindProp(string requestedKey, out Prop prop)
+    {
+        prop = null;
+        if (string.IsNullOrEmpty(requestedKey)) return false;
+        if (propsByPath.TryGetValue(requestedKey, out prop) && prop != null) return true;
+        foreach (var alias in GetPropAliases(null, requestedKey))
+            if (propsByAlias.TryGetValue(alias, out prop) && prop != null) return true;
+        return false;
+    }
+
+    private static IEnumerable<string> GetPropAliases(Prop prop, string key)
+    {
+        if (!string.IsNullOrEmpty(key))
         {
-            if (prop != null) propsByPath[GetPropKey(prop)] = prop;
+            yield return key;
+            yield return NormalizePropKey(key);
+            var slash = key.LastIndexOf('/');
+            if (slash >= 0 && slash + 1 < key.Length) yield return key.Substring(slash + 1).ToLowerInvariant();
         }
+        if (prop != null && !string.IsNullOrEmpty(prop.name)) yield return prop.name.ToLowerInvariant();
+    }
+
+    private static string NormalizePropKey(string key)
+    {
+        return Regex.Replace((key ?? string.Empty).ToLowerInvariant(), @"\[[0-9]+\]", string.Empty);
     }
 
     private static string GetPropKey(Prop prop)
@@ -901,8 +1325,13 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
 
     private static BeakHandle FindHandleForProp(Goose goose, Prop prop)
     {
+        return FindHandleForProp(goose == null ? null : goose.holder, prop);
+    }
+
+    private static BeakHandle FindHandleForProp(Holder holder, Prop prop)
+    {
         if (prop == null || prop.beakHandles == null || prop.beakHandles.Length == 0) return null;
-        var origin = goose != null && goose.holdParent != null ? goose.holdParent.position : prop.transform.position;
+        var origin = holder != null ? holder.transform.position : prop.transform.position;
         return prop.beakHandles
             .Where(handle => handle != null && handle.prop == prop && handle.isActiveAndEnabled)
             .OrderBy(handle => (handle.transform.position - origin).sqrMagnitude)
@@ -912,15 +1341,113 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
     private void RebuildBrainCache()
     {
         brainsByPath.Clear();
+        brainsByAlias.Clear();
         foreach (var brain in UObject.FindObjectsOfType<Brain>())
-            if (brain != null && brain.root != null) brainsByPath[GetStablePath(brain.root)] = brain;
+        {
+            if (brain == null) continue;
+            var key = GetStablePath(brain.transform);
+            brainsByPath[key] = brain;
+            AddAlias(brainsByAlias, key, brain);
+        }
+    }
+
+    private static string GetBrainStateName(Brain brain)
+    {
+        return brain == null || brain.currentState == null ? string.Empty : brain.currentState.GetType().Name;
+    }
+
+    private static void ApplyBrainState(Brain brain, string stateName)
+    {
+        if (brain == null || brain.brainStates == null || brain.brainStates.allStates == null || string.IsNullOrEmpty(stateName)) return;
+        if (brain.currentState != null && string.Equals(brain.currentState.GetType().Name, stateName, StringComparison.Ordinal)) return;
+        var target = brain.brainStates.allStates.FirstOrDefault(state => state != null && string.Equals(state.GetType().Name, stateName, StringComparison.Ordinal));
+        if (target == null) return;
+        try
+        {
+            var swapTo = brain.brainStates.GetType().GetMethod("SwapTo", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            swapTo?.Invoke(brain.brainStates, new object[] { target });
+        }
+        catch { }
+    }
+
+    private void RestoreRemoteBrainAgents()
+    {
+        foreach (var brain in remoteBrainAgents)
+        {
+            if (brain == null || brain.agent == null) continue;
+            brain.agent.updatePosition = true;
+            brain.agent.updateRotation = true;
+        }
+        remoteBrainAgents.Clear();
     }
 
     private void RebuildSwitchCache()
     {
         switchesByPath.Clear();
+        switchesByAlias.Clear();
         foreach (var system in UObject.FindObjectsOfType<SwitchSystem>())
-            if (system != null) switchesByPath[GetStablePath(system.transform)] = system;
+        {
+            if (system == null) continue;
+            var key = GetStablePath(system.transform);
+            switchesByPath[key] = system;
+            AddAlias(switchesByAlias, key, system);
+        }
+    }
+
+    private static void AddAlias<T>(Dictionary<string, T> aliases, string key, T value) where T : class
+    {
+        aliases[NormalizePropKey(key)] = value;
+        var slash = key.LastIndexOf('/');
+        if (slash >= 0 && slash + 1 < key.Length)
+        {
+            var leaf = key.Substring(slash + 1).ToLowerInvariant();
+            aliases[leaf] = value;
+            aliases[NormalizePropKey(leaf)] = value;
+        }
+    }
+
+    private bool TryFindBrain(string key, out Brain brain)
+    {
+        brain = null;
+        if (string.IsNullOrEmpty(key)) return false;
+        if (brainsByPath.TryGetValue(key, out brain) && brain != null) return true;
+        if (brainsByAlias.TryGetValue(NormalizePropKey(key), out brain) && brain != null) return true;
+        var slash = key.LastIndexOf('/');
+        if (slash >= 0 && slash + 1 < key.Length)
+        {
+            var leaf = key.Substring(slash + 1).ToLowerInvariant();
+            if (brainsByAlias.TryGetValue(leaf, out brain) && brain != null) return true;
+            if (brainsByAlias.TryGetValue(NormalizePropKey(leaf), out brain) && brain != null) return true;
+        }
+        return false;
+    }
+
+    private bool TryFindSwitch(string key, out SwitchSystem system)
+    {
+        system = null;
+        if (string.IsNullOrEmpty(key)) return false;
+        if (switchesByPath.TryGetValue(key, out system) && system != null) return true;
+        if (switchesByAlias.TryGetValue(NormalizePropKey(key), out system) && system != null) return true;
+        var slash = key.LastIndexOf('/');
+        if (slash >= 0 && slash + 1 < key.Length)
+        {
+            var leaf = key.Substring(slash + 1).ToLowerInvariant();
+            if (switchesByAlias.TryGetValue(leaf, out system) && system != null) return true;
+            if (switchesByAlias.TryGetValue(NormalizePropKey(leaf), out system) && system != null) return true;
+        }
+        return false;
+    }
+
+    internal void RequestImmediateWorldSnapshot()
+    {
+        if (Role == OnlineRole.Host && IsConnected && IsGameplayReady()) switchSnapshotPending = true;
+    }
+
+    internal bool AllowSwitchStateChange(SwitchSystem system, int state)
+    {
+        if (Role != OnlineRole.Client || system == null) return true;
+        if (!authoritativeSwitchStates.TryGetValue(GetStablePath(system.transform), out var authoritativeState)) return true;
+        return authoritativeState == state;
     }
 
     private static string GetStablePath(Transform transform)
@@ -964,6 +1491,22 @@ internal static class GoalAwardPatch
         var runtime = OnlineRuntime.Instance;
         if (runtime == null || !runtime.IsOnline || runtime.Role != OnlineRole.Host) return;
         runtime.BroadcastGoal(__instance.goalInfo.goalName);
+    }
+}
+
+[HarmonyPatch(typeof(SwitchSystem), nameof(SwitchSystem.SetState))]
+internal static class SwitchStatePatch
+{
+    private static bool Prefix(SwitchSystem __instance, int state)
+    {
+        var runtime = OnlineRuntime.Instance;
+        return runtime == null || runtime.AllowSwitchStateChange(__instance, state);
+    }
+
+    private static void Postfix(SwitchSystem __instance)
+    {
+        var runtime = OnlineRuntime.Instance;
+        if (runtime != null) runtime.RequestImmediateWorldSnapshot();
     }
 }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 namespace GooseOnline;
@@ -17,14 +18,17 @@ internal enum MessageType : byte
     ProgressSnapshot = 8,
     GameReady = 9,
     InitialWorldSnapshot = 10,
+    ProgressApplied = 11,
+    HostPose = 12,
 }
 
 internal static class Protocol
 {
     internal const uint Magic = 0x474F4F53; // GOOS
-    internal const byte Version = 3;
+    internal const byte Version = 5;
     internal const int HeaderBytes = sizeof(uint) + sizeof(byte) + sizeof(byte) + sizeof(int) + sizeof(int);
     internal const int MaxPacketBytes = 64 * 1024;
+    internal const int MaxLivePacketBytes = 1200;
 
     internal sealed class Packet
     {
@@ -47,6 +51,8 @@ internal static class Protocol
     internal sealed class PropState
     {
         public string Path;
+        public string HeldByBrainPath;
+        public string BrainState;
         public Vector3 Position;
         public Quaternion Rotation;
         public Vector3 Velocity;
@@ -59,6 +65,7 @@ internal static class Protocol
         public Pose GooseB;
         public List<PropState> Props = new List<PropState>();
         public List<PropState> Brains = new List<PropState>();
+        public List<SwitchState> Switches = new List<SwitchState>();
     }
 
     internal sealed class SwitchState
@@ -137,10 +144,12 @@ internal static class Protocol
 
     internal static byte[] EncodePose(int tick, Pose pose) => Encode(MessageType.ClientPose, tick, writer => WritePose(writer, pose));
 
+    internal static byte[] EncodeHostPose(int tick, Pose pose) => Encode(MessageType.HostPose, tick, writer => WritePose(writer, pose));
+
     internal static bool TryReadPose(Packet packet, out Pose pose)
     {
         pose = null;
-        if (packet?.Type != MessageType.ClientPose) return false;
+        if (packet?.Type != MessageType.ClientPose && packet?.Type != MessageType.HostPose) return false;
         try
         {
             using (var ms = new MemoryStream(packet.Payload, false))
@@ -149,29 +158,78 @@ internal static class Protocol
         catch { return false; }
     }
 
-    internal static byte[] EncodeWorld(int tick, WorldState state) => EncodeWorld(MessageType.WorldSnapshot, tick, state);
+    internal static byte[] EncodeWorld(int tick, WorldState state) => EncodeWorld(MessageType.WorldSnapshot, tick, state, MaxPacketBytes);
 
-    internal static byte[] EncodeInitialWorld(int tick, WorldState state) => EncodeWorld(MessageType.InitialWorldSnapshot, tick, state);
+    internal static byte[] EncodeLiveWorld(int tick, WorldState state) => EncodeWorld(MessageType.WorldSnapshot, tick, state, MaxLivePacketBytes);
 
-    private static byte[] EncodeWorld(MessageType type, int tick, WorldState state) => Encode(type, tick, writer =>
+    internal static byte[] EncodeInitialWorld(int tick, WorldState state) => EncodeWorld(MessageType.InitialWorldSnapshot, tick, state, MaxPacketBytes);
+
+    private static byte[] EncodeWorld(MessageType type, int tick, WorldState state, int packetLimit) => Encode(type, tick, writer =>
     {
         WritePose(writer, state.GooseA);
         WritePose(writer, state.GooseB);
-        writer.Write(Math.Min(state.Props.Count, 512));
-        for (var i = 0; i < state.Props.Count && i < 512; i++)
-        {
-            var prop = state.Props[i];
-            writer.Write(prop.Path ?? string.Empty);
-            WritePose(writer, new Pose { Position = prop.Position, Rotation = prop.Rotation, Velocity = prop.Velocity });
-        }
-        writer.Write(Math.Min(state.Brains.Count, 128));
-        for (var i = 0; i < state.Brains.Count && i < 128; i++)
-        {
-            var brain = state.Brains[i];
-            writer.Write(brain.Path ?? string.Empty);
-            WritePose(writer, new Pose { Position = brain.Position, Rotation = brain.Rotation, Velocity = brain.Velocity });
-        }
+        var remaining = packetLimit - HeaderBytes - 12 - MeasurePose(state.GooseA) - MeasurePose(state.GooseB);
+        var switchItems = FitItems(state.Switches.Take(512), WriteSwitch, ref remaining);
+        var brainItems = FitItems(state.Brains.Take(128), WriteBrain, ref remaining);
+        var propItems = FitItems(state.Props.Take(512).OrderByDescending(p => !string.IsNullOrEmpty(p.HeldByBrainPath)), WriteProp, ref remaining);
+        writer.Write(propItems.Count);
+        foreach (var item in propItems) writer.Write(item);
+        writer.Write(brainItems.Count);
+        foreach (var item in brainItems) writer.Write(item);
+        writer.Write(switchItems.Count);
+        foreach (var item in switchItems) writer.Write(item);
     });
+
+    private static List<byte[]> FitItems<T>(IEnumerable<T> items, Action<BinaryWriter, T> write, ref int remaining)
+    {
+        var result = new List<byte[]>();
+        foreach (var item in items)
+        {
+            using (var ms = new MemoryStream())
+            using (var itemWriter = new BinaryWriter(ms))
+            {
+                write(itemWriter, item);
+                itemWriter.Flush();
+                var bytes = ms.ToArray();
+                if (bytes.Length > remaining) continue;
+                result.Add(bytes);
+                remaining -= bytes.Length;
+            }
+        }
+        return result;
+    }
+
+    private static void WriteProp(BinaryWriter writer, PropState prop)
+    {
+        writer.Write(prop.Path ?? string.Empty);
+        writer.Write(prop.HeldByBrainPath ?? string.Empty);
+        WritePose(writer, new Pose { Position = prop.Position, Rotation = prop.Rotation, Velocity = prop.Velocity });
+    }
+
+    private static void WriteBrain(BinaryWriter writer, PropState brain)
+    {
+        writer.Write(brain.Path ?? string.Empty);
+        writer.Write(brain.HeldByBrainPath ?? string.Empty);
+        writer.Write(brain.BrainState ?? string.Empty);
+        WritePose(writer, new Pose { Position = brain.Position, Rotation = brain.Rotation, Velocity = Vector3.zero });
+    }
+
+    private static void WriteSwitch(BinaryWriter writer, SwitchState switchState)
+    {
+        writer.Write(switchState.Path ?? string.Empty);
+        writer.Write(switchState.State);
+    }
+
+    private static int MeasurePose(Pose pose)
+    {
+        using (var ms = new MemoryStream())
+        using (var writer = new BinaryWriter(ms))
+        {
+            WritePose(writer, pose);
+            writer.Flush();
+            return (int)ms.Length;
+        }
+    }
 
     internal static bool TryReadWorld(Packet packet, out WorldState state)
     {
@@ -188,17 +246,24 @@ internal static class Protocol
                 for (var i = 0; i < count; i++)
                 {
                     var path = reader.ReadString();
+                    var heldByBrainPath = reader.ReadString();
                     var pose = ReadPose(reader);
-                    state.Props.Add(new PropState { Path = path, Position = pose.Position, Rotation = pose.Rotation, Velocity = pose.Velocity });
+                    state.Props.Add(new PropState { Path = path, HeldByBrainPath = heldByBrainPath, Position = pose.Position, Rotation = pose.Rotation, Velocity = pose.Velocity });
                 }
                 var brainCount = reader.ReadInt32();
                 if (brainCount < 0 || brainCount > 128) return false;
                 for (var i = 0; i < brainCount; i++)
                 {
                     var path = reader.ReadString();
+                    var heldByBrainPath = reader.ReadString();
+                    var brainState = reader.ReadString();
                     var pose = ReadPose(reader);
-                    state.Brains.Add(new PropState { Path = path, Position = pose.Position, Rotation = pose.Rotation, Velocity = pose.Velocity });
+                    state.Brains.Add(new PropState { Path = path, HeldByBrainPath = heldByBrainPath, BrainState = brainState, Position = pose.Position, Rotation = pose.Rotation, Velocity = pose.Velocity });
                 }
+                var switchCount = reader.ReadInt32();
+                if (switchCount < 0 || switchCount > 512) return false;
+                for (var i = 0; i < switchCount; i++)
+                    state.Switches.Add(new SwitchState { Path = reader.ReadString(), State = reader.ReadInt32() });
                 return true;
             }
         }
@@ -208,27 +273,31 @@ internal static class Protocol
     internal static byte[] EncodeProgress(int tick, ProgressState state) => Encode(MessageType.ProgressSnapshot, tick, writer =>
     {
         writer.Write(state.Area);
-        writer.Write(Math.Min(state.Switches.Count, 512));
-        for (var i = 0; i < state.Switches.Count && i < 512; i++)
-        {
-            writer.Write(state.Switches[i].Path ?? string.Empty);
-            writer.Write(state.Switches[i].State);
-        }
-        writer.Write(Math.Min(state.Saves.Count, 1024));
-        for (var i = 0; i < state.Saves.Count && i < 1024; i++)
-        {
-            writer.Write(state.Saves[i].Key ?? string.Empty);
-            writer.Write(state.Saves[i].BoolValue);
-            writer.Write(state.Saves[i].IntValue);
-        }
-        writer.Write(Math.Min(state.Goals.Count, 256));
-        for (var i = 0; i < state.Goals.Count && i < 256; i++)
-        {
-            writer.Write(state.Goals[i].Name ?? string.Empty);
-            writer.Write(state.Goals[i].Awarded);
-            writer.Write(state.Goals[i].Hidden);
-        }
+        var remaining = MaxPacketBytes - HeaderBytes - 16; // area plus three list counts
+        var goalItems = FitItems(state.Goals.Take(256), WriteGoal, ref remaining);
+        var switchItems = FitItems(state.Switches.Take(512), WriteSwitch, ref remaining);
+        var saveItems = FitItems(state.Saves.Take(1024), WriteSave, ref remaining);
+        writer.Write(switchItems.Count);
+        foreach (var item in switchItems) writer.Write(item);
+        writer.Write(saveItems.Count);
+        foreach (var item in saveItems) writer.Write(item);
+        writer.Write(goalItems.Count);
+        foreach (var item in goalItems) writer.Write(item);
     });
+
+    private static void WriteSave(BinaryWriter writer, SaveState save)
+    {
+        writer.Write(save.Key ?? string.Empty);
+        writer.Write(save.BoolValue);
+        writer.Write(save.IntValue);
+    }
+
+    private static void WriteGoal(BinaryWriter writer, GoalState goal)
+    {
+        writer.Write(goal.Name ?? string.Empty);
+        writer.Write(goal.Awarded);
+        writer.Write(goal.Hidden);
+    }
 
     internal static bool TryReadProgress(Packet packet, out ProgressState state)
     {

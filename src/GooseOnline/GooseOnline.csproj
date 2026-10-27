@@ -21,6 +21,7 @@
     <Reference Include="UnityEngine.AnimationModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.AnimationModule.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="UnityEngine.IMGUIModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="UnityEngine.PhysicsModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.AIModule"><HintPath>D:\Program Files (x86)\Steam\steamapps\common\Untitled Goose Game\Untitled_Data\Managed\UnityEngine.AIModule.dll</HintPath><Private>False</Private></Reference>
   </ItemGroup>
 </Project>
 

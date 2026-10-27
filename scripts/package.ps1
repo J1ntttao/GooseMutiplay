@@ -3,7 +3,7 @@ param([string]$GamePath = 'D:\Program Files (x86)\Steam\steamapps\common\Untitle
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 & (Join-Path $PSScriptRoot 'build.ps1') -GamePath $GamePath
-$stage = Join-Path $root 'dist\GooseOnline-0.4.2'
+$stage = Join-Path $root 'dist\GooseOnline-0.4.19'
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stage 'payload') | Out-Null
 Copy-Item (Join-Path $root 'dist\GooseOnline.dll') (Join-Path $stage 'payload\GooseOnline.dll') -Force
@@ -18,7 +18,7 @@ Copy-Item (Join-Path $root 'scripts\uninstall.ps1') (Join-Path $stage 'uninstall
 Copy-Item (Join-Path $root 'scripts\Install-GooseOnline.bat') (Join-Path $stage 'Install-GooseOnline.bat') -Force
 Copy-Item (Join-Path $root 'scripts\Uninstall-GooseOnline.bat') (Join-Path $stage 'Uninstall-GooseOnline.bat') -Force
 Copy-Item (Join-Path $root 'README.md') (Join-Path $stage 'README.md') -Force
-$zip = Join-Path $root 'dist\GooseOnline-0.4.2.zip'
+$zip = Join-Path $root 'dist\GooseOnline-0.4.19.zip'
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
 Write-Host "Packaged $zip"
