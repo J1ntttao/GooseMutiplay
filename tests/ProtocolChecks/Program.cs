@@ -16,7 +16,7 @@ foreach (var type in new[] { MessageType.Welcome, MessageType.Leave, MessageType
         Check(!Protocol.TryDecode(bytes.Take(i).ToArray(), out _), "Truncated header accepted");
 }
 
-var hello = Protocol.Encode(MessageType.Hello, 0, w => { w.Write("0.4.1"); w.Write(Protocol.Version); });
+var hello = Protocol.Encode(MessageType.Hello, 0, w => { w.Write("0.4.2"); w.Write(Protocol.Version); });
 Check(Protocol.TryDecode(hello, out var receivedHello), "Host cannot receive Hello");
 Check(receivedHello.Type == MessageType.Hello, "Wrong handshake request");
 var welcome = Protocol.Encode(MessageType.Welcome, 1);
@@ -47,6 +47,15 @@ var progressBytes = Protocol.EncodeProgress(8, new Protocol.ProgressState
 Check(Protocol.TryDecode(progressBytes, out var progressPacket), "Progress packet cannot decode");
 Check(Protocol.TryReadProgress(progressPacket, out var progress), "Progress state cannot decode");
 Check(progress.Area == 2 && progress.Switches.Count == 1 && progress.Saves[0].BoolValue && progress.Goals[0].Awarded, "Progress state changed");
+
+var initialWorldBytes = Protocol.EncodeInitialWorld(9, new Protocol.WorldState
+{
+    GooseA = new Protocol.Pose { Position = new UnityEngine.Vector3(10f, 0f, 0f) },
+    GooseB = new Protocol.Pose { Position = new UnityEngine.Vector3(20f, 0f, 0f) }
+});
+Check(Protocol.TryDecode(initialWorldBytes, out var initialWorldPacket), "Initial world packet cannot decode");
+Check(Protocol.TryReadWorld(initialWorldPacket, out var initialWorld), "Initial world state cannot decode");
+Check(initialWorldPacket.Type == MessageType.InitialWorldSnapshot && initialWorld.GooseA.Position.x == 10f && initialWorld.GooseB.Position.x == 20f, "Initial goose positions changed");
 
 var extraByte = welcome.Concat(new byte[] { 1 }).ToArray();
 Check(!Protocol.TryDecode(extraByte, out _), "Unannounced extra bytes accepted");

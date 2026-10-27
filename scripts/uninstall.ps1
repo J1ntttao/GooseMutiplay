@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param([string]$GamePath, [switch]$NoElevation, [switch]$NoPause)
 $ErrorActionPreference = 'Stop'
-Write-Host 'Goose Online uninstaller 0.4.1'
+Write-Host 'Goose Online uninstaller 0.4.2'
 function Test-IsAdministrator { $identity = [Security.Principal.WindowsIdentity]::GetCurrent(); $principal = New-Object Security.Principal.WindowsPrincipal($identity); return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 if (-not (Test-IsAdministrator) -and -not $NoElevation) { $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath); if ($GamePath) { $args += @('-GamePath',$GamePath) }; Start-Process powershell.exe -Verb RunAs -ArgumentList $args | Out-Null; exit 0 }
 function Get-SteamRoots {
@@ -36,4 +36,3 @@ Write-Host ''
 Write-Host 'Goose Online uninstalled.' -ForegroundColor Green
 Write-Host 'BepInEx was kept so other mods are not affected.'
 if (-not $NoPause) { Read-Host 'Press Enter to close' }
-

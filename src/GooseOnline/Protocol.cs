@@ -15,12 +15,14 @@ internal enum MessageType : byte
     Ping = 6,
     GoalAwarded = 7,
     ProgressSnapshot = 8,
+    GameReady = 9,
+    InitialWorldSnapshot = 10,
 }
 
 internal static class Protocol
 {
     internal const uint Magic = 0x474F4F53; // GOOS
-    internal const byte Version = 2;
+    internal const byte Version = 3;
     internal const int HeaderBytes = sizeof(uint) + sizeof(byte) + sizeof(byte) + sizeof(int) + sizeof(int);
     internal const int MaxPacketBytes = 64 * 1024;
 
@@ -147,7 +149,11 @@ internal static class Protocol
         catch { return false; }
     }
 
-    internal static byte[] EncodeWorld(int tick, WorldState state) => Encode(MessageType.WorldSnapshot, tick, writer =>
+    internal static byte[] EncodeWorld(int tick, WorldState state) => EncodeWorld(MessageType.WorldSnapshot, tick, state);
+
+    internal static byte[] EncodeInitialWorld(int tick, WorldState state) => EncodeWorld(MessageType.InitialWorldSnapshot, tick, state);
+
+    private static byte[] EncodeWorld(MessageType type, int tick, WorldState state) => Encode(type, tick, writer =>
     {
         WritePose(writer, state.GooseA);
         WritePose(writer, state.GooseB);
@@ -170,7 +176,7 @@ internal static class Protocol
     internal static bool TryReadWorld(Packet packet, out WorldState state)
     {
         state = null;
-        if (packet?.Type != MessageType.WorldSnapshot) return false;
+        if (packet?.Type != MessageType.WorldSnapshot && packet?.Type != MessageType.InitialWorldSnapshot) return false;
         try
         {
             using (var ms = new MemoryStream(packet.Payload, false))

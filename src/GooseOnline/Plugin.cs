@@ -21,7 +21,7 @@ public sealed class GooseOnlinePlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.gooseonline.steam-p2p";
     public const string PluginName = "Goose Online";
-    public const string PluginVersion = "0.4.1";
+    public const string PluginVersion = "0.4.2";
 
     private void Awake()
     {
@@ -48,7 +48,6 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private const uint AppId = 837470;
     private const int Channel = 37;
     private const float SnapshotInterval = 0.10f;
-    private const float ProgressInterval = 0.50f;
     private const float ObjectCacheInterval = 1.00f;
     private const float PoseInterval = 1f / 30f;
     private const string VersionKey = "gooseonline_version";
@@ -57,7 +56,6 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private Lobby? lobby;
     private SteamId peer;
     private float nextSnapshot;
-    private float nextProgressSnapshot;
     private float nextObjectCacheRefresh;
     private float nextPose;
     private float nextHello;
@@ -71,6 +69,11 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private string connectedPlayerId = "-";
     private Protocol.Pose remotePose;
     private bool controllersNormalized;
+    private bool localGameReadyAnnounced;
+    private bool remoteGameReady;
+    private bool initialStateSent;
+    private bool initialWorldApplied;
+    private bool initialProgressApplied;
     private bool uiVisible = true;
     private string updateStatus = "正在检查更新...";
     private int updateProcessId;
@@ -282,6 +285,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             return;
         }
         EnsureTwoPlayerMode();
+        UpdateInitialSync();
         if (Time.unscaledTime >= nextObjectCacheRefresh)
         {
             nextObjectCacheRefresh = Time.unscaledTime + ObjectCacheInterval;
@@ -297,15 +301,10 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                 SendLocalPose();
             }
         }
-        else if (Role == OnlineRole.Host && Time.unscaledTime >= nextSnapshot)
+        else if (Role == OnlineRole.Host && initialStateSent && Time.unscaledTime >= nextSnapshot)
         {
             nextSnapshot = Time.unscaledTime + SnapshotInterval;
             SendWorldSnapshot();
-        }
-        if (Role == OnlineRole.Host && Time.unscaledTime >= nextProgressSnapshot)
-        {
-            nextProgressSnapshot = Time.unscaledTime + ProgressInterval;
-            SendProgressSnapshot();
         }
     }
 
@@ -318,7 +317,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
     private void OnGUI()
     {
         if (!uiVisible) return;
-        GUILayout.BeginArea(new Rect(16, 16, 360, 300), GUI.skin.box);
+        GUILayout.BeginArea(new Rect(16, 16, 380, 360), GUI.skin.box);
         GUILayout.Label("Goose Online " + GooseOnlinePlugin.PluginVersion);
         if (!string.IsNullOrEmpty(updateStatus)) GUILayout.Label(updateStatus);
         GUILayout.Label(status);
@@ -343,6 +342,8 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             GUILayout.Label("SteamID：" + connectedPlayerId);
             GUILayout.Label(Role == OnlineRole.Host ? "世界同步发送：" + worldSnapshotsSent : "世界同步接收：" + worldSnapshotsReceived);
             GUILayout.Label(Role == OnlineRole.Host ? "进度同步发送：" + progressSnapshotsSent : "进度同步接收：" + progressSnapshotsReceived);
+            GUILayout.Label("链接成功后，双方都要手动进入单人游戏中");
+            if (GUILayout.Button("模拟手柄操作")) SimulateGamepadOperation();
             if (lobby.HasValue && GUILayout.Button("打开 Steam 邀请面板")) SteamFriends.OpenGameInviteOverlay(lobby.Value.Id);
             if (GUILayout.Button("离开联机")) LeaveSession();
         }
@@ -368,7 +369,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             worldSnapshotsReceived = 0;
             progressSnapshotsSent = 0;
             progressSnapshotsReceived = 0;
-            nextProgressSnapshot = 0f;
+            ResetInitialSyncState();
             status = "房间已创建，等待朋友加入";
             EnsureTwoPlayerMode();
             SteamFriends.OpenGameInviteOverlay(lobby.Value.Id);
@@ -394,7 +395,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             worldSnapshotsReceived = 0;
             progressSnapshotsSent = 0;
             progressSnapshotsReceived = 0;
-            nextProgressSnapshot = 0f;
+            ResetInitialSyncState();
             handshakeStartedAt = Time.unscaledTime;
             peer = lobby.Value.Owner.Id;
             SteamNetworking.AcceptP2PSessionWithUser(peer);
@@ -481,31 +482,45 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
 
     private void SendWorldSnapshot()
     {
+        var state = BuildWorldState();
+        if (state == null) return;
+        Send(Protocol.EncodeWorld(state.Tick, state), P2PSend.UnreliableNoDelay);
+        worldSnapshotsSent++;
+    }
+
+    private void SendInitialWorldSnapshot()
+    {
+        var state = BuildWorldState();
+        if (state == null) return;
+        Send(Protocol.EncodeInitialWorld(state.Tick, state), P2PSend.ReliableWithBuffering);
+        worldSnapshotsSent++;
+    }
+
+    private Protocol.WorldState BuildWorldState()
+    {
         var localGoose = GetGoose(0);
         var remoteGoose = GetGoose(1);
-        if (localGoose == null || remoteGoose == null) return;
+        if (localGoose == null || remoteGoose == null) return null;
         var state = new Protocol.WorldState { Tick = tick++, GooseA = ToPose(localGoose), GooseB = ToPose(remoteGoose) };
         RebuildPropCache();
         foreach (var prop in propsByPath.Values)
         {
             if (prop == null || prop.rb == null) continue;
             state.Props.Add(new Protocol.PropState { Path = GetPropKey(prop), Position = prop.transform.position, Rotation = prop.transform.rotation, Velocity = prop.rb.velocity });
-            if (state.Props.Count >= 256) break;
         }
         RebuildBrainCache();
         foreach (var brain in brainsByPath.Values)
         {
             if (brain == null || brain.root == null) continue;
             state.Brains.Add(new Protocol.PropState { Path = GetStablePath(brain.root), Position = brain.root.position, Rotation = brain.root.rotation, Velocity = Vector3.zero });
-            if (state.Brains.Count >= 64) break;
         }
-        Send(Protocol.EncodeWorld(state.Tick, state), P2PSend.UnreliableNoDelay);
-        worldSnapshotsSent++;
+        return state;
     }
 
     private void SendProgressSnapshot()
     {
         if (Role != OnlineRole.Host || !IsConnected) return;
+        RebuildSwitchCache();
         var state = new Protocol.ProgressState { Area = (int)AreaTracker.mostRecentArea };
         foreach (var pair in switchesByPath)
             if (pair.Value != null) state.Switches.Add(new Protocol.SwitchState { Path = pair.Key, State = pair.Value.currentState });
@@ -523,6 +538,42 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         progressSnapshotsSent++;
     }
 
+    private void UpdateInitialSync()
+    {
+        if (!IsConnected || !IsGameplayReady()) return;
+
+        if (Role == OnlineRole.Client && !localGameReadyAnnounced)
+        {
+            Send(Protocol.Encode(MessageType.GameReady, tick++), P2PSend.Reliable);
+            localGameReadyAnnounced = true;
+            status = "已进入游戏，等待主机同步进度";
+        }
+
+        if (Role == OnlineRole.Host && remoteGameReady && !initialStateSent)
+        {
+            SendInitialState();
+        }
+    }
+
+    private bool IsGameplayReady()
+    {
+        var game = GameManager.instance;
+        return game != null && game.readyForGeese && game.activeGooseCount >= 2 && GetGoose(0) != null && GetGoose(1) != null;
+    }
+
+    private void SendInitialState()
+    {
+        if (initialStateSent || Role != OnlineRole.Host || !IsConnected || !IsGameplayReady()) return;
+        try
+        {
+            SendInitialWorldSnapshot();
+            SendProgressSnapshot();
+            initialStateSent = true;
+            status = "双方已进入游戏，已发送初始世界进度";
+        }
+        catch (Exception ex) { Warn("发送初始世界进度失败: " + ex.Message); }
+    }
+
     private void ApplyProgress(Protocol.ProgressState state)
     {
         if (state == null) return;
@@ -538,6 +589,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                 foreach (var save in state.Saves)
                 {
                     var entry = SaveGameData.instance.GetSaveEntry(save.Key);
+                    if (entry == null) continue;
                     entry.boolValue = save.BoolValue;
                     entry.intValue = save.IntValue;
                 }
@@ -561,6 +613,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                     if (goalState.Awarded && !goal.awarded) goal.SetToAwarded();
                     if (!goalState.Hidden && goal.hidden) goal.Unhide();
                 }
+            SaveManager.instance?.Save("GooseOnline.InitialSync");
         }
         catch (Exception ex) { Warn("应用关卡进度失败: " + ex.Message); }
     }
@@ -597,7 +650,6 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                 RefreshPeerInfo();
                 IsConnected = true; status = "客户端已连接";
                 Send(Protocol.Encode(MessageType.Welcome, tick++), P2PSend.Reliable);
-                SendProgressSnapshot();
                 break;
             case MessageType.Welcome:
                 if (Role == OnlineRole.Client) { RefreshPeerInfo(); IsConnected = true; status = "已连接到房主"; }
@@ -605,13 +657,22 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             case MessageType.ClientPose:
                 if (Role == OnlineRole.Host && Protocol.TryReadPose(packet, out var pose)) QueueRemotePose(pose);
                 break;
-            case MessageType.WorldSnapshot:
-                if (Role == OnlineRole.Client)
+            case MessageType.GameReady:
+                if (Role == OnlineRole.Host)
+                {
+                    remoteGameReady = true;
+                    SendInitialState();
+                }
+                break;
+            case MessageType.InitialWorldSnapshot:
+                if (Role == OnlineRole.Client && !initialWorldApplied)
                 {
                     if (Protocol.TryReadWorld(packet, out var state))
                     {
                         worldSnapshotsReceived++;
                         ApplyWorld(state);
+                        initialWorldApplied = true;
+                        if (initialProgressApplied) status = "已完成主机世界进度同步";
                     }
                     else if (Time.unscaledTime >= nextWorldSnapshotWarning)
                     {
@@ -620,14 +681,20 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                     }
                 }
                 break;
+            case MessageType.WorldSnapshot:
+                if (Role == OnlineRole.Client && Protocol.TryReadWorld(packet, out var liveWorld))
+                    ApplyLiveWorld(liveWorld);
+                break;
             case MessageType.GoalAwarded:
                 if (Role == OnlineRole.Client && Protocol.TryReadGoal(packet, out var goalName)) ApplyGoal(goalName);
                 break;
             case MessageType.ProgressSnapshot:
-                if (Role == OnlineRole.Client && Protocol.TryReadProgress(packet, out var progress))
+                if (Role == OnlineRole.Client && !initialProgressApplied && Protocol.TryReadProgress(packet, out var progress))
                 {
                     progressSnapshotsReceived++;
                     ApplyProgress(progress);
+                    initialProgressApplied = true;
+                    if (initialWorldApplied) status = "已完成主机世界进度同步";
                 }
                 break;
             case MessageType.Leave:
@@ -637,7 +704,21 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
 
     private void ApplyWorld(Protocol.WorldState state)
     {
+        // Host P1 is the remote goose on the client; host P2 is the client's local goose.
+        ApplyGoosePose(1, state.GooseA);
+        ApplyGoosePose(0, state.GooseB);
         QueueRemotePose(state.GooseA);
+        ApplyWorldObjects(state);
+    }
+
+    private void ApplyLiveWorld(Protocol.WorldState state)
+    {
+        QueueRemotePose(state.GooseA);
+        ApplyWorldObjects(state);
+    }
+
+    private void ApplyWorldObjects(Protocol.WorldState state)
+    {
         RebuildPropCache();
         foreach (var propState in state.Props)
         {
@@ -753,6 +834,36 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         catch (Exception ex) { Warn("双人模式初始化失败: " + ex.Message); }
     }
 
+    private void SimulateGamepadOperation()
+    {
+        try
+        {
+            var manager = BaseMultiplayerManager.instance;
+            if (manager != null) manager.preferredPlayerCount = 2;
+            var menu = UObject.FindObjectOfType<PlayerNumberMenu>();
+            if (menu != null) menu.ConfirmTwoPlayer();
+            var game = GameManager.instance;
+            if (game != null)
+            {
+                if (game.readyForGeese && game.activeGooseCount < 2) game.ActivateAllGeese();
+                game.PlayersChanged();
+            }
+            if (manager != null) BaseMultiplayerManager.ReturnAllFloatingControllersToPlayer1();
+            status = "已执行模拟手柄操作，请继续进入游戏";
+        }
+        catch (Exception ex) { Warn("模拟手柄操作失败: " + ex.Message); }
+    }
+
+    private void ResetInitialSyncState()
+    {
+        nextSnapshot = 0f;
+        localGameReadyAnnounced = false;
+        remoteGameReady = false;
+        initialStateSent = false;
+        initialWorldApplied = false;
+        initialProgressApplied = false;
+    }
+
     private List<Goose> GetGeese()
     {
         try
@@ -857,7 +968,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         try { Send(Protocol.Encode(MessageType.Leave, tick++), P2PSend.Reliable); } catch { }
         try { if (peer.IsValid) SteamNetworking.CloseP2PSessionWithUser(peer); } catch { }
         try { lobby?.Leave(); } catch { }
-        lobby = null; peer = default(SteamId); Role = OnlineRole.None; IsConnected = false; status = "单机模式"; connectedPlayerName = "未连接"; connectedPlayerId = "-"; remotePose = null; controllersNormalized = false; worldSnapshotsSent = 0; worldSnapshotsReceived = 0;
+        lobby = null; peer = default(SteamId); Role = OnlineRole.None; IsConnected = false; status = "单机模式"; connectedPlayerName = "未连接"; connectedPlayerId = "-"; remotePose = null; controllersNormalized = false; ResetInitialSyncState(); worldSnapshotsSent = 0; worldSnapshotsReceived = 0; progressSnapshotsSent = 0; progressSnapshotsReceived = 0;
     }
 
     internal void BroadcastGoal(string goalName)
