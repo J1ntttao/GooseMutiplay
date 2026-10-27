@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ProtocolChecks")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5021f663b89e159e67db493c6c32c253ccd0b843")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fa4dee4bab84423e32b0c78665b5cce7e5ec833d")]
 [assembly: System.Reflection.AssemblyProductAttribute("ProtocolChecks")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ProtocolChecks")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

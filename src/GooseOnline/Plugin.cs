@@ -68,7 +68,6 @@ internal sealed class OnlineRuntime : MonoBehaviour
     private string connectedPlayerName = "未连接";
     private string connectedPlayerId = "-";
     private Protocol.Pose remotePose;
-    private bool controllersNormalized;
     private bool localGameReadyAnnounced;
     private bool remoteGameReady;
     private bool initialStateSent;
@@ -343,7 +342,6 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
             GUILayout.Label(Role == OnlineRole.Host ? "世界同步发送：" + worldSnapshotsSent : "世界同步接收：" + worldSnapshotsReceived);
             GUILayout.Label(Role == OnlineRole.Host ? "进度同步发送：" + progressSnapshotsSent : "进度同步接收：" + progressSnapshotsReceived);
             GUILayout.Label("链接成功后，双方都要手动进入单人游戏中");
-            if (GUILayout.Button("模拟手柄操作")) SimulateGamepadOperation();
             if (lobby.HasValue && GUILayout.Button("打开 Steam 邀请面板")) SteamFriends.OpenGameInviteOverlay(lobby.Value.Id);
             if (GUILayout.Button("离开联机")) LeaveSession();
         }
@@ -823,35 +821,10 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
                 }
                 EnsureGooseActive(GetGoose(0));
                 EnsureGooseActive(GetGoose(1));
-                if (!controllersNormalized)
-                {
-                    BaseMultiplayerManager.ReturnAllFloatingControllersToPlayer1();
-                    controllersNormalized = true;
-                }
             }
             game?.PlayersChanged();
         }
         catch (Exception ex) { Warn("双人模式初始化失败: " + ex.Message); }
-    }
-
-    private void SimulateGamepadOperation()
-    {
-        try
-        {
-            var manager = BaseMultiplayerManager.instance;
-            if (manager != null) manager.preferredPlayerCount = 2;
-            var menu = UObject.FindObjectOfType<PlayerNumberMenu>();
-            if (menu != null) menu.ConfirmTwoPlayer();
-            var game = GameManager.instance;
-            if (game != null)
-            {
-                if (game.readyForGeese && game.activeGooseCount < 2) game.ActivateAllGeese();
-                game.PlayersChanged();
-            }
-            if (manager != null) BaseMultiplayerManager.ReturnAllFloatingControllersToPlayer1();
-            status = "已执行模拟手柄操作，请继续进入游戏";
-        }
-        catch (Exception ex) { Warn("模拟手柄操作失败: " + ex.Message); }
     }
 
     private void ResetInitialSyncState()
@@ -968,7 +941,7 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         try { Send(Protocol.Encode(MessageType.Leave, tick++), P2PSend.Reliable); } catch { }
         try { if (peer.IsValid) SteamNetworking.CloseP2PSessionWithUser(peer); } catch { }
         try { lobby?.Leave(); } catch { }
-        lobby = null; peer = default(SteamId); Role = OnlineRole.None; IsConnected = false; status = "单机模式"; connectedPlayerName = "未连接"; connectedPlayerId = "-"; remotePose = null; controllersNormalized = false; ResetInitialSyncState(); worldSnapshotsSent = 0; worldSnapshotsReceived = 0; progressSnapshotsSent = 0; progressSnapshotsReceived = 0;
+        lobby = null; peer = default(SteamId); Role = OnlineRole.None; IsConnected = false; status = "单机模式"; connectedPlayerName = "未连接"; connectedPlayerId = "-"; remotePose = null; ResetInitialSyncState(); worldSnapshotsSent = 0; worldSnapshotsReceived = 0; progressSnapshotsSent = 0; progressSnapshotsReceived = 0;
     }
 
     internal void BroadcastGoal(string goalName)
